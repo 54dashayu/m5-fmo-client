@@ -5,7 +5,7 @@
 #include <string.h>
 // Audio-task-owned FIFO. Never waits for a transport lock or replays across sessions.
 #define VOICE_TX_BYTES 752
-#define VOICE_TX_SLOTS 4
+#define VOICE_TX_SLOTS 8
 #define VOICE_TX_MAX_AGE_US 640000
  typedef struct {size_t n;int64_t at;uint8_t data[VOICE_TX_BYTES];} voice_tx_item_t;
 typedef struct {voice_tx_item_t items[VOICE_TX_SLOTS];unsigned head,count;uint32_t sent,retries,dropped;} voice_tx_t;

@@ -38,3 +38,25 @@ for count in (1,2):
  assert struct.unpack_from('<I',packet,36)[0]==zlib.crc32(packet[64:])
  assert [struct.unpack_from('<H',packet,64+i*344)[0] for i in range(count)]==list(range(1,count+1))
 print('PASS: one/two frame uplink fits MSS with unchanged decoding')
+# Protocol 6.2: emulate a stateful peer (not our per-frame decoder), including
+# resynchronization after deliberate frame losses and uint16 sequence wrap.
+import math
+encoder_state=(0,0);peer_state=(0,0);last_frame=0xffff
+for number in range(140):
+ frame=(65500+number)&0xffff
+ samples=[int(9500*math.sin(2*math.pi*(110+number%7)*((number*640+j)/8000))) for j in range(640)]
+ pcm=struct.pack('<640h',*samples);p,index=C.c_int(encoder_state[0]),C.c_int(encoder_state[1]);raw=C.create_string_buffer(328)
+ c.radpcm_encode(pcm,raw,frame,C.byref(p),C.byref(index))
+ fi,recover,step,reserved,length=struct.unpack_from('<HhBBH',raw.raw)
+ assert (fi,recover,step,reserved,length)==(frame,*encoder_state,0,320)
+ reference,next_state=audioop.lin2adpcm(pcm,2,encoder_state)
+ assert raw.raw[8:]==reference
+ encoder_state=(p.value,index.value);assert encoder_state==next_state
+ if number in (5,6,39):continue
+ if last_frame==0xffff or fi==0 or fi!=((last_frame+1)&0xffff):peer_state=(recover,step)
+ decoded,peer_state=audioop.adpcm2lin(raw.raw[8:],2,peer_state)
+ independent=C.create_string_buffer(1280);assert c.radpcm_decode(raw,independent)
+ assert decoded==independent.raw
+ assert peer_state==encoder_state
+ last_frame=fi
+print('PASS: 140-frame stateful peer decoding, dropped-frame recovery and uint16 wrap match independent IMA')

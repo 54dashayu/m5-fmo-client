@@ -12,11 +12,11 @@ int main(void){
  blocked=true;p=3;voice_tx_push(&q,&p,1,200000);
  voice_tx_pump(&q,839999,send_packet);assert(q.count==1);
  voice_tx_pump(&q,840000,send_packet);assert(q.count==0&&q.dropped==1);
- for(p=4;p<9;p++)voice_tx_push(&q,&p,1,900000);
- assert(q.count==4&&q.dropped==2&&q.items[q.head].data[0]==5);
+ for(p=4;p<4+VOICE_TX_SLOTS+1;p++)voice_tx_push(&q,&p,1,900000);
+ assert(q.count==VOICE_TX_SLOTS&&q.dropped==2&&q.items[q.head].data[0]==5);
  // Disconnect, new burst and peer receive all discard pending audio.
  voice_tx_clear(&q);blocked=false;voice_tx_pump(&q,900001,send_packet);
- assert(q.count==0&&q.dropped==6&&count==2);
+ assert(q.count==0&&q.dropped==2+VOICE_TX_SLOTS&&count==2);
  // A stopped capture can drain its tail without recording new samples.
  p=9;voice_tx_push(&q,&p,1,1000000);voice_tx_pump(&q,1100000,send_packet);
  assert(count==3&&sent[2]==9&&q.count==0);
