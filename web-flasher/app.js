@@ -28,7 +28,7 @@ async function refreshVersion(){
  finally{refreshing=false;update();}
 }
 $('refreshVersion').addEventListener('click',()=>refreshVersion().catch(()=>{}));
-$('copyLog').addEventListener('click',async()=>{try{await navigator.clipboard.writeText('网页版本：20261109.2\n'+$('versionStatus').textContent+'\n'+$('log').textContent);$('copyLog').textContent='已复制日志';}catch{$('copyLog').textContent='复制失败，请选择日志文字复制';}});
+$('copyLog').addEventListener('click',async()=>{try{await navigator.clipboard.writeText('网页版本：20261109.3\n'+$('versionStatus').textContent+'\n'+$('log').textContent);$('copyLog').textContent='已复制日志';}catch{$('copyLog').textContent='复制失败，请选择日志文字复制';}});
 refreshVersion().catch(()=>{});
 function validPartitions(data){const d=new DataView(data.buffer,data.byteOffset,data.byteLength);let nvs=false,app=false;for(let p=0;p+32<=data.length;p+=32){if(d.getUint16(p,true)!==0x50aa)break;const type=d.getUint8(p+2),sub=d.getUint8(p+3),off=d.getUint32(p+4,true),size=d.getUint32(p+8,true);if(type===1&&sub===2&&off===0x9000&&size===0x6000)nvs=true;if(type===0&&sub===0&&off===0x10000&&size===0x300000)app=true;}return nvs&&app;}
 // Original ESP32 + USB UART: keep GPIO0 released and pulse EN through RTS.
@@ -49,7 +49,7 @@ $('flash').addEventListener('click',async()=>{
  try{
  const install=document.querySelector('input[name=mode]:checked').value==='install';
  const port=await navigator.serial.requestPort();
- status('下载并校验固件…');const manifest=await refreshVersion();log('固件 v'+manifest.version+' · 网页 20261109.2 · 波特率 115200');const parts=manifest.parts.filter(p=>install||p.address===0x10000);
+ status('下载并校验固件…');const manifest=await refreshVersion();log('固件 v'+manifest.version+' · 网页 20261109.3 · 波特率 115200');const parts=manifest.parts.filter(p=>install||p.address===0x10000);
  const expected=install?[4096,32768,65536]:[65536];if(JSON.stringify(parts.map(p=>p.address))!==JSON.stringify(expected))throw Error('固件清单分区不符合预期');
  const files=await Promise.all(parts.map(async p=>({address:p.address,data:await binary(p)})));
  const transport=new Transport(port,true);const loader=new ESPLoader({transport,baudrate:115200,terminal:{clean(){},write:log,writeLine:log},debugLogging:false});session={transport,loader,files,ready:false};status('正在连接 M5…');await loader.main();if(loader.chip.CHIP_NAME!=='ESP32')throw Error('检测到非原版 ESP32，已停止，未写入');
