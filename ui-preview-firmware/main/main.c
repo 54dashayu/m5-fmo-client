@@ -11,7 +11,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <time.h>
-extern const lv_font_t font20, status_font, ui_small, ui_call, ui_clock, relay_font;
+extern const lv_font_t font20, history_font, status_font, ui_small, ui_call, ui_clock, relay_font;
 #include "fonts/coverage.h"
 #include "buttons.h"
 #include "voice.h"
@@ -20,7 +20,7 @@ extern const lv_font_t font20, status_font, ui_small, ui_call, ui_clock, relay_f
 #include "utf8_name.h"
 static bool relay_glyph(uint32_t c){lv_font_glyph_dsc_t d;return lv_font_get_glyph_dsc(&relay_font,&d,c,0);}
 static lv_obj_t *title,*lines[5],*footer,*brand;
-static lv_obj_t *home,*net,*caption,*badge,*call_label,*hint,*relay_name,*relay_id,*home_notice,*last_call,*previous_call,*b_hint,*bars[9];
+static lv_obj_t *home,*local_call,*net,*caption,*badge,*call_label,*hint,*relay_name,*relay_id,*home_notice,*last_call,*previous_call,*b_hint,*bars[9];
 static buttons_t keys;
 unsigned ui_key_events;int ui_last_key=-1,ui_last_action=-1;
 enum {HOME,MENU,RELAYS,VOLUME,IDENTITY,WEB,MIC};
@@ -44,19 +44,23 @@ static lv_obj_t *home_label(const char*t,int x,int y,int w,const lv_font_t*f,uin
 }
 static void build_home(void){
  home=box(lv_scr_act(),0,0,320,240,0x0b151c,0);
- home_label("FMO / M5",12,8,104,&status_font,0xd4e4eb);
- net=home_label("Wi-Fi · 未联网",124,9,184,&ui_small,0xb4c7d2);lv_obj_set_style_text_align(net,LV_TEXT_ALIGN_RIGHT,0);
+ home_label("FMO / M5",12,8,72,&status_font,0xd4e4eb);
+ local_call=home_label("--",90,8,158,&status_font,0x7ec9ff);
+ lv_label_set_long_mode(local_call,LV_LABEL_LONG_SCROLL_CIRCULAR);
+ net=home_label("Wi-Fi",250,9,58,&ui_small,0xb4c7d2);lv_obj_set_style_text_align(net,LV_TEXT_ALIGN_RIGHT,0);
  lv_obj_t*card=box(home,10,32,300,93,0x14232d,12);lv_obj_set_style_border_width(card,1,0);lv_obj_set_style_border_color(card,lv_color_hex(0x263b48),0);
  caption=home_label("我的呼号",23,43,180,&ui_small,0xb4c7d2);
  badge=home_label("未接入",240,42,58,&ui_small,0xa8b5bf);lv_obj_set_style_text_align(badge,LV_TEXT_ALIGN_CENTER,0);lv_obj_set_style_bg_opa(badge,LV_OPA_COVER,0);lv_obj_set_style_bg_color(badge,lv_color_hex(0x263139),0);lv_obj_set_style_radius(badge,9,0);lv_obj_set_style_pad_ver(badge,3,0);
- call_label=home_label("M.BH1JSS",22,65,274,&ui_call,0xeaf4f7);
- hint=home_label("等待重新接入",23,108,216,&ui_small,0xc2d3de);
+ call_label=home_label("M.BH1JSS",22,64,276,&ui_call,0xffd166);
+ hint=home_label("等待重新接入",23,110,216,&ui_small,0xc2d3de);
  for(int i=0;i<9;i++)bars[i]=box(home,247+i*5,116,3,3,0x58d6b2,1);
  lv_obj_t*last_card=box(home,10,132,300,34,0x162a35,8);lv_obj_set_style_border_width(last_card,1,0);lv_obj_set_style_border_color(last_card,lv_color_hex(0x2a4858),0);
  home_label("上次",20,143,32,&status_font,0xb4c7d2);
- last_call=home_label("--",54,136,142,&font20,0x7ec9ff);
- box(home,200,140,1,18,0x35505f,0);
- previous_call=home_label("--",208,144,90,&ui_small,0xa8bfce);lv_obj_set_style_text_align(previous_call,LV_TEXT_ALIGN_RIGHT,0);
+ last_call=home_label("--",54,136,124,&font20,0x7ec9ff);
+ box(home,182,140,1,18,0x35505f,0);
+ previous_call=home_label("--",190,138,108,&history_font,0x7ec9ff);lv_obj_set_style_text_align(previous_call,LV_TEXT_ALIGN_RIGHT,0);
+ lv_label_set_long_mode(last_call,LV_LABEL_LONG_SCROLL_CIRCULAR);
+ lv_label_set_long_mode(previous_call,LV_LABEL_LONG_SCROLL_CIRCULAR);
  relay_name=home_label("",12,173,245,&relay_font,0xe0ebf1);
  relay_id=home_label("",259,174,49,&status_font,0xb4c7d2);lv_obj_set_style_text_align(relay_id,LV_TEXT_ALIGN_RIGHT,0);
  home_notice=home_label("",12,190,296,&ui_small,0xc2d3de);
@@ -70,7 +74,9 @@ static void build_home(void){
 static void refresh_home(const device_view_t*v,const voice_view_t*a,const relay_t*r){
  uint32_t accent=a->tx?0xffb778:a->rx?0x7ec9ff:v->mqtt_online?0x58d6b2:0xa8b5bf;
  uint32_t tint=a->tx?0x3b2a20:a->rx?0x193348:v->mqtt_online?0x12352f:0x263139;
- lv_label_set_text(net,!v->online?"Wi-Fi · 未联网":v->mqtt_online?"Wi-Fi · 已连接":"Wi-Fi 已连接 · 中继断开");
+ lv_label_set_text_fmt(local_call,"本机：M.%s",v->call);
+ lv_label_set_text(net,v->online?"Wi-Fi":"未联网");
+ lv_obj_set_style_text_color(net,lv_color_hex(v->online?0x58d6b2:0xffb778),0);
  lv_label_set_text(caption,a->rx&&!a->tx?"当前通联 · 对方呼号":a->tx?"当前通联 · 本机发话":show_clock?"北京时间":"最近通联");
  lv_label_set_text(badge,a->tx?"发话中":a->rx?"接收中":v->mqtt_online?"守听中":"未接入");
  lv_obj_set_style_text_color(badge,lv_color_hex(accent),0);lv_obj_set_style_bg_color(badge,lv_color_hex(tint),0);
@@ -81,12 +87,13 @@ static void refresh_home(const device_view_t*v,const voice_view_t*a,const relay_
  else if(pending_clock)lv_label_set_text(call_label,"等待校时");
  else {time_t china=utc+8*3600;struct tm t;gmtime_r(&china,&t);char clock[16];strftime(clock,sizeof(clock),"%H:%M:%S",&t);lv_label_set_text(call_label,clock);}
  lv_obj_set_style_text_align(call_label,idle?LV_TEXT_ALIGN_CENTER:LV_TEXT_ALIGN_LEFT,0);
- // Long legal callsigns still fit the card instead of being cropped.
- lv_obj_set_style_text_font(call_label,pending_clock?&font20:idle?&ui_clock:strlen(lv_label_get_text(call_label))>12?&font20:&ui_call,0);
- lv_obj_set_y(call_label,idle&&!pending_clock?60:65);
- if(a->tx)lv_label_set_text(hint,"再次短按 B 停止");else if(a->rx)lv_label_set_text_fmt(hint,"本机 M.%s",v->call);else lv_label_set_text_fmt(hint,"本机 M.%s",v->call);
+ // Keep the large callsign font; scroll only when it exceeds the card width.
+ lv_obj_set_style_text_font(call_label,pending_clock?&font20:idle?&ui_clock:&ui_call,0);
+ lv_obj_set_y(call_label,64);
+ lv_label_set_long_mode(call_label,LV_LABEL_LONG_SCROLL_CIRCULAR);
+ lv_obj_set_style_text_color(call_label,lv_color_hex(0xffd166),0);
+ if(a->tx)lv_label_set_text(hint,"再次短按 B 停止");else lv_label_set_text(hint,idle?"":a->rx?"接收中":v->mqtt_online?"守听中":"中继断开");
  lv_label_set_text(last_call,a->last_caller[0]?a->last_caller:"--");
- lv_obj_set_style_text_font(last_call,strlen(a->last_caller)>8?&status_font:&font20,0);
  lv_label_set_text(previous_call,a->previous_caller[0]?a->previous_caller:"--");
  char name[65];name_for_display(name,sizeof(name),r->name[0]?r->name:r->call,relay_glyph);lv_label_set_text(relay_name,name);lv_label_set_text_fmt(relay_id,"%lu",(unsigned long)r->uid);
  if(a->muted)lv_label_set_text_fmt(home_notice,"%s · 静音",a->notice[0]?a->notice:"守听中");else lv_label_set_text_fmt(home_notice,"%s · 音量 %d%%",a->notice[0]?a->notice:"守听中",a->volume);lv_label_set_text(b_hint,a->tx?"B  停止发话":"B  开始发话");lv_obj_set_style_text_color(b_hint,lv_color_hex(accent),0);
