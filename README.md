@@ -2,7 +2,7 @@
 
 让 M5Stack FIRE 类 ESP32 设备直接通过 Wi‑Fi 接入 FMO 中继，使用内置麦克风和扬声器通联。无需手机或电脑转发语音。
 
-**当前发布版本：v0.7.11。** 已在一台 ESP32、16 MB Flash、GPIO34 模拟麦克风 / GPIO25 DAC 扬声器的 FIRE 类设备上验证。其他 M5 型号请先核对硬件，不能直接等同兼容。
+**当前发布版本：v0.7.11；设备试测版本：v0.7.13。** 已在一台 ESP32、16 MB Flash、GPIO34 模拟麦克风 / GPIO25 DAC 扬声器的 FIRE 类设备上验证。其他 M5 型号请先核对硬件，不能直接等同兼容。
 
 [在线刷写](https://app.bh1jss.net/m5-flasher/) · [下载固件](https://github.com/54dashayu/m5-fmo-client/releases/latest) · [刷机与编译](docs/BUILD.md) · [配网和操作](docs/USER_GUIDE.md) · [证书说明](docs/CERTIFICATES.md) · [版本记录](CHANGELOG.md)
 
