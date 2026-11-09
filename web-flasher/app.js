@@ -28,19 +28,28 @@ async function refreshVersion(){
  finally{refreshing=false;update();}
 }
 $('refreshVersion').addEventListener('click',()=>refreshVersion().catch(()=>{}));
-$('copyLog').addEventListener('click',async()=>{try{await navigator.clipboard.writeText('网页版本：20261109.1\n'+$('versionStatus').textContent+'\n'+$('log').textContent);$('copyLog').textContent='已复制日志';}catch{$('copyLog').textContent='复制失败，请选择日志文字复制';}});
+$('copyLog').addEventListener('click',async()=>{try{await navigator.clipboard.writeText('网页版本：20261109.2\n'+$('versionStatus').textContent+'\n'+$('log').textContent);$('copyLog').textContent='已复制日志';}catch{$('copyLog').textContent='复制失败，请选择日志文字复制';}});
 refreshVersion().catch(()=>{});
 function validPartitions(data){const d=new DataView(data.buffer,data.byteOffset,data.byteLength);let nvs=false,app=false;for(let p=0;p+32<=data.length;p+=32){if(d.getUint16(p,true)!==0x50aa)break;const type=d.getUint8(p+2),sub=d.getUint8(p+3),off=d.getUint32(p+4,true),size=d.getUint32(p+8,true);if(type===1&&sub===2&&off===0x9000&&size===0x6000)nvs=true;if(type===0&&sub===0&&off===0x10000&&size===0x300000)app=true;}return nvs&&app;}
+// Original ESP32 + USB UART: keep GPIO0 released and pulse EN through RTS.
+// esptool-js 0.7.1 HardReset only deasserts RTS, leaving the stub running.
+async function restartDevice(transport){
+ await transport.setDTR(false);
+ await transport.setRTS(true);
+ await new Promise(resolve=>setTimeout(resolve,120));
+ await transport.setRTS(false);
+ await new Promise(resolve=>setTimeout(resolve,200));
+}
 async function release(reset=false){
  const old=session;session=null;$('review').hidden=true;
- if(old){if(reset&&old.loader?.chip)try{await old.loader.after('hard_reset');}catch(e){log(e.message);}try{await old.transport.disconnect();}catch(e){log(e.message);}}
+ if(old){if(reset&&old.loader?.chip)try{await restartDevice(old.transport);}catch(e){log(e.message);}try{await old.transport.disconnect();}catch(e){log(e.message);}}
 }
 $('flash').addEventListener('click',async()=>{
  if(busy||session)return;busy=true;update();$('progress').value=0;$('log').textContent='';
  try{
  const install=document.querySelector('input[name=mode]:checked').value==='install';
  const port=await navigator.serial.requestPort();
- status('下载并校验固件…');const manifest=await refreshVersion();log('固件 v'+manifest.version+' · 网页 20261109.1 · 波特率 115200');const parts=manifest.parts.filter(p=>install||p.address===0x10000);
+ status('下载并校验固件…');const manifest=await refreshVersion();log('固件 v'+manifest.version+' · 网页 20261109.2 · 波特率 115200');const parts=manifest.parts.filter(p=>install||p.address===0x10000);
  const expected=install?[4096,32768,65536]:[65536];if(JSON.stringify(parts.map(p=>p.address))!==JSON.stringify(expected))throw Error('固件清单分区不符合预期');
  const files=await Promise.all(parts.map(async p=>({address:p.address,data:await binary(p)})));
  const transport=new Transport(port,true);const loader=new ESPLoader({transport,baudrate:115200,terminal:{clean(){},write:log,writeLine:log},debugLogging:false});session={transport,loader,files,ready:false};status('正在连接 M5…');await loader.main();if(loader.chip.CHIP_NAME!=='ESP32')throw Error('检测到非原版 ESP32，已停止，未写入');
@@ -52,10 +61,10 @@ $('flash').addEventListener('click',async()=>{
  finally{busy=false;update();if(session?.ready)$('confirmFlash').focus();}
 });
 $('confirmFlash').addEventListener('click',async()=>{
- if(busy||!session?.ready)return;busy=true;update();const {loader,files}=session;
+ if(busy||!session?.ready)return;busy=true;update();const {loader,files,transport}=session;
  try{
  status('正在写入，请勿断开 USB…');await loader.writeFlash({fileArray:files,flashMode:'dio',flashFreq:'80m',flashSize:'4MB',eraseAll:false,compress:true,calculateMD5Hash:data=>md5(data),reportProgress:(i,w,total)=>{$('progress').value=100*(i+w/total)/files.length;$('status').textContent='正在写入第 '+(i+1)+'/'+files.length+' 个文件 · '+Math.round(100*w/total)+'% · 请勿断开 USB';}});
- $('progress').value=100;status('写入及校验完成，正在重启设备…');try{await loader.after('hard_reset');status('刷写成功。请查看 M5 屏幕，等待设备启动。');}catch(e){log(e.message);status('固件写入及校验成功，但自动重启失败。请手动重启 M5，无需重复刷写。');}
+ $('progress').value=100;status('写入及校验完成，正在重启设备…');try{await restartDevice(transport);status('写入及校验成功，已发送重启信号。请查看 M5 屏幕确认启动。');}catch(e){log(e.message);status('固件写入及校验成功，但自动重启失败。请手动重启 M5，无需重复刷写。');}
  }catch(e){status('刷写未完成：'+e.message+'。请保持供电并重新完成刷写。');}
  finally{await release();busy=false;update();}
 });
