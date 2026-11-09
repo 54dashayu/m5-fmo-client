@@ -6,6 +6,21 @@
 
 [在线刷写](https://app.bh1jss.net/m5-flasher/) · [下载固件](https://github.com/54dashayu/m5-fmo-client/releases/latest) · [刷机与编译](docs/BUILD.md) · [配网和操作](docs/USER_GUIDE.md) · [证书说明](docs/CERTIFICATES.md) · [版本记录](CHANGELOG.md)
 
+## 实机展示
+
+右侧绿色底座设备为本项目 M5 FMO 终端，旁边为 Passport。照片由 BH1JSS 提供。
+
+![M5 FMO 终端与 Passport 实机展示](docs/images/m5-device-3.jpg)
+
+<details>
+<summary>查看更多实机照片</summary>
+
+![M5 终端显示 P.BH1JSS 通联信息](docs/images/m5-device-2.jpg)
+
+![M5 终端显示时间与网络状态](docs/images/m5-device-1.jpg)
+
+</details>
+
 ## 能做什么
 
 - 独立设备身份，FMO 4.0 证书链校验和 MQTT 登录。
