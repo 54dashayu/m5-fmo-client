@@ -142,3 +142,9 @@ ESP-IDF **v5.5.1**，目标 `esp32`。仓库包含本地依赖；不要直接替
 硬件驱动基于 [esp32-fmo-companion](https://github.com/54dashayu/esp32-fmo-companion) 的 M5 适配基础，发展为独立 FMO 客户端。本项目不是官方 FMO 或 AI Passport 固件。
 
 本项目代码采用 [MIT License](LICENSE)，保留原作者 BI8SIG 的版权声明。第三方库、字库分别按各自许可分发，见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+
+## 当前测试版：0.7.17-dev
+
+在线刷写页面现提供此测试版：新增更换使用者、在线重新申请与管理员证书包导入，首页显示最近两个不同呼号（左大右小）。普通用户不再下载申请文件。
+
+已在 M5 上刷写校验，确认启动、联网、证书和服务器接入正常；部分设备的长语音播放卡断及扬声器无声仍在排查。本版不声明修复音质问题。0.7.14 稳定版保留供回退。
