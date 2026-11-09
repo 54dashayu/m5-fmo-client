@@ -1,7 +1,7 @@
 /*******************************************************************************
  * Size: 28 px
  * Bpp: 4
- * Opts: --font assets/fonts/NotoSansCJKsc-Bold.otf --size 28 --bpp 4 --format lvgl --no-compress --no-kerning --range 32-126 --lv-font-name ui_call -o main/fonts/ui_call.c
+ * Opts: --font /Users/bh1jss/Documents/ChatGPT/AI Passport项目/github-release/m5-fmo-client/ui-preview-firmware/assets/fonts/NotoSansCJKsc-Bold.otf --size 28 --bpp 4 --format lvgl --no-compress --no-kerning --range 32-126 --lv-font-name ui_call -o /Users/bh1jss/Documents/ChatGPT/AI Passport项目/github-release/m5-fmo-client/ui-preview-firmware/main/fonts/ui_call.c
  ******************************************************************************/
 
 #ifdef LV_LVGL_H_INCLUDE_SIMPLE

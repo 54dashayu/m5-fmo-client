@@ -15,3 +15,11 @@ secrets/
 requests/
 *.db
 *.sqlite*
+
+artifacts/
+.playwright-cli/
+
+output/
+web-flasher/node_modules/
+web-flasher/public/app.js
+web-flasher/public/firmware/

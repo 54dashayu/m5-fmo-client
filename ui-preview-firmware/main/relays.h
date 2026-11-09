@@ -12,3 +12,6 @@ bool relays_get(int index,relay_t*out);
 bool relays_select(int index);
 cJSON*relays_json(void);
 const char*relays_add(const cJSON*j);
+
+void relays_connection(const relay_t*target,bool success);
+void relays_clear_evidence(void);
