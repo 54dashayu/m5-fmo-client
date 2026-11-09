@@ -70,7 +70,7 @@ def main():
    if self.command=='GET' and self.path=='/api/transport':return self.send(200,{'usb':True,'token':token})
    if self.headers.get('X-Device-Token')!=token:return self.send(401,{'error':'请刷新本机管理页面'})
    if self.command=='GET' and self.path=='/api/diagnostics':return self.send(200,{'events':list(link.events)})
-   routes={('POST','/api/certificate/rollback'):'rollback',('POST','/api/scan'):'scan',('GET','/api/networks'):'networks',('POST','/api/network/connect'):'network_connect',('POST','/api/network/delete'):'network_delete',('GET','/api/status'):'status',('GET','/api/relays'):'relays',('POST','/api/relays'):'relay_add',('POST','/api/relay/select'):'relay_select',('POST','/api/wifi'):'wifi',('POST','/api/reconnect'):'reconnect',('POST','/api/request'):'request',('POST','/api/certificate'):'certificate',('DELETE','/api/certificate'):'delete'}
+   routes={('POST','/api/identity/reset'):'identity_reset',('POST','/api/certificate/rollback'):'rollback',('POST','/api/scan'):'scan',('GET','/api/networks'):'networks',('POST','/api/network/connect'):'network_connect',('POST','/api/network/delete'):'network_delete',('GET','/api/status'):'status',('GET','/api/relays'):'relays',('POST','/api/relays'):'relay_add',('POST','/api/relay/select'):'relay_select',('POST','/api/wifi'):'wifi',('POST','/api/reconnect'):'reconnect',('POST','/api/request'):'request',('POST','/api/certificate'):'certificate',('DELETE','/api/certificate'):'delete'}
    op=routes.get((self.command,self.path))
    if not op:return self.send(404,{'error':'未知接口'})
    data={}
