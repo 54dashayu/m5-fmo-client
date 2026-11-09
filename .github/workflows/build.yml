@@ -1,0 +1,42 @@
+name: Build and test
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  firmware:
+    runs-on: ubuntu-latest
+    container: espressif/idf:v5.5.1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build ESP32 firmware
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          idf.py -C ui-preview-firmware build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: m5-fmo-firmware
+          path: |
+            ui-preview-firmware/build/m5-fmo-ui-preview.bin
+            ui-preview-firmware/build/bootloader/bootloader.bin
+            ui-preview-firmware/build/partition_table/partition-table.bin
+  host-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/checkout@v4
+        with:
+          repository: espressif/esp-idf
+          ref: v5.5.1
+          path: .idf-test
+          sparse-checkout: components/json
+      - run: git -C .idf-test submodule update --init --depth 1 components/json/cJSON
+      - run: pip install -r requirements.txt
+      - run: python tools/run_tests.py
+        env:
+          IDF_PATH: ${{ github.workspace }}/.idf-test

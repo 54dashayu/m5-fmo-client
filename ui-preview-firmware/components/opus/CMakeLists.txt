@@ -1,0 +1,5 @@
+file(GLOB OPUS_SRC "src/*.c" "celt/*.c" "silk/*.c" "silk/fixed/*.c")
+list(FILTER OPUS_SRC EXCLUDE REGEX "(opus_demo|opus_compare|opus_custom_demo|repacketizer_demo)\\.c$")
+idf_component_register(SRCS ${OPUS_SRC} INCLUDE_DIRS "include" PRIV_INCLUDE_DIRS "." "src" "celt" "silk" "silk/fixed")
+target_compile_definitions(${COMPONENT_LIB} PRIVATE OPUS_BUILD FIXED_POINT DISABLE_FLOAT_API USE_ALLOCA)
+target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-error -Wno-unused-function)

@@ -1,0 +1,32 @@
+{
+  "sn": 17910002,
+  "type": "intermediateCA",
+  "issuer": {
+    "sn": 17910001,
+    "name": "BH1JSS M5 Root CA",
+    "publicKey": "5y6IrwX4_Ju5vgdgKHOVrxeseLqlpjIorugzCvcpE0c"
+  },
+  "subject": {
+    "name": "BH1JSS M5 Device Issuer",
+    "email": "",
+    "publicKey": "K1X3fD1C0V4zS20r98MGn-hUwASBK5sUTFJp3gpPtbg"
+  },
+  "extensions": {
+    "isCA": true,
+    "pathLen": 0,
+    "keyId": "bh1jss-m5-issuer-2026",
+    "crl": "",
+    "license": "",
+    "uidRange": {
+      "start": 17910100,
+      "end": 17910199
+    },
+    "issuingCountries": [
+      "CN"
+    ]
+  },
+  "iat": 1794121775,
+  "exp": 1951802075,
+  "signatureAlgorithm": "Ed25519",
+  "signature": "j7Gsw_5xXDgzLL96TB6-PN73F0B-qOQB0m8JTjgUvWeoeT96Wk25OrxuAwsvPGbZn_Dr7Lr8kFcCdwNpiigVCQ"
+}

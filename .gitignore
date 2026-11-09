@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+**/build/
+**/sdkconfig.old
+release-dist/
+*.pem
+*.key
+*.p12
+*.pfx
+.env*
+secrets/
+*-bundle.json
+requests/
+*.db
+*.sqlite*

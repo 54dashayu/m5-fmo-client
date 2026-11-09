@@ -1,0 +1,4 @@
+cryptography==50.0.2
+cbor2==6.2.1
+pyserial==3.5
+audioop-lts==0.2.2; python_version >= "3.13"

@@ -1,0 +1,2 @@
+Vendored upstream Opus 1.5.2 from https://downloads.xiph.org/releases/opus/opus-1.5.2.tar.gz
+ESP-IDF CMakeLists.txt added for generic fixed-point build. Upstream COPYING applies.

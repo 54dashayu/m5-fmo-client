@@ -1,0 +1,23 @@
+{
+  "sn": 17910001,
+  "type": "rootCA",
+  "issuer": {
+    "name": "BH1JSS M5 Root CA",
+    "email": ""
+  },
+  "subject": {
+    "name": "BH1JSS M5 Root CA",
+    "publicKey": "5y6IrwX4_Ju5vgdgKHOVrxeseLqlpjIorugzCvcpE0c"
+  },
+  "extensions": {
+    "isCA": true,
+    "pathLen": 1,
+    "crl": "",
+    "license": "",
+    "keyId": "bh1jss-m5-root-2026"
+  },
+  "iat": 1794121775,
+  "exp": 2109482075,
+  "signatureAlgorithm": "Ed25519",
+  "signature": "FzDO8UEpFu9OUJMtv94YdleYvTOX3XG6g-dqzBAR5O9ZUHnhn5l1Eu-Eui0oS3fqJtOQ_OmpxOB49VeZZJPEDw"
+}
