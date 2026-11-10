@@ -15,3 +15,8 @@ const char*relays_add(const cJSON*j);
 
 void relays_connection(const relay_t*target,bool success);
 void relays_clear_evidence(void);
+
+int relays_order(int out[RELAY_MAX]);
+const char*relays_remove(int index,const relay_t*expected);
+
+const char*relays_update_name(const cJSON*j);

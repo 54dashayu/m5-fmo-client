@@ -112,7 +112,7 @@ static void key(int k,key_action_t action,void*ctx){(void)ctx;ui_key_events++;ui
  if(action!=KEY_SHORT)return;
  if(page==HOME){if(k==0)voice_volume(-5);if(k==1)voice_toggle_ptt();if(k==2)voice_volume(5);return;}
  if(page==MENU){if(k==0)selection=(selection+6)%7;if(k==2)selection=(selection+1)%7;if(k==1){int target=selection;if(target==0)go(RELAYS);else if(target==1)go(VOLUME);else if(target==2)go(IDENTITY);else if(target==3)go(WEB);else if(target==4)voice_tone();else if(target==5)go(MIC);else go(HOME);}return;}
- if(page==RELAYS){int n=relays_count();if(k==0)selection=(selection+n-1)%n;if(k==2)selection=(selection+1)%n;if(k==1&&device_select_relay(selection))go(HOME);return;}
+ if(page==RELAYS){int order[RELAY_MAX],n=relays_order(order),pos=0;for(int i=0;i<n;i++)if(order[i]==selection)pos=i;if(k==0)selection=order[(pos+n-1)%n];if(k==2)selection=order[(pos+1)%n];if(k==1&&device_select_relay(selection))go(HOME);return;}
  if(page==VOLUME){if(k==0)voice_volume(-5);if(k==2)voice_volume(5);if(k==1)voice_mute();return;}
  if(k==1)go(HOME);
 }
@@ -129,7 +129,7 @@ static void refresh(void){
  if(page==HOME){
   refresh_home(&v,&a,&relay);
  }else if(page==MENU){lv_label_set_text_fmt(title,"设备菜单  %d/2",selection/5+1);for(int i=0;i<5;i++){int n=(selection/5)*5+i;if(n<7)lv_label_set_text_fmt(lines[i],"%s %s",n==selection?">":" ",items[n]);else lv_label_set_text(lines[i],"");}lv_label_set_text(footer,"A 上项  B 确认  C 下项 / 长按A返回");
- }else if(page==RELAYS){lv_label_set_text(title,"选择中继");for(int i=0;i<relays_count();i++){relay_t r;relays_get(i,&r);char name[65];name_for_display(name,sizeof(name),r.name[0]?r.name:r.call,relay_glyph);lv_label_set_text_fmt(lines[i],"%s %s%s / %s",selection==i?">":" ",current==i?"[当前] ":"",name,r.call);}lv_label_set_text(lines[4],"在网页添加中继；通联中不能切换");lv_label_set_text(footer,"A 上项  B 接入  C 下项 / 长按A返回");
+ }else if(page==RELAYS){lv_label_set_text(title,"选择中继");int order[RELAY_MAX],n=relays_order(order);for(int i=0;i<4;i++)lv_label_set_text(lines[i],"");if(selection>=n)selection=current;for(int i=0;i<n;i++){int index=order[i];relay_t r;relays_get(index,&r);char name[65];name_for_display(name,sizeof(name),r.name[0]?r.name:r.call,relay_glyph);lv_label_set_text_fmt(lines[i],"%s %s%s / %s",selection==index?">":" ",current==index?"[当前] ":"",name,r.call);}lv_label_set_text(lines[4],"在网页添加中继；通联中不能切换");lv_label_set_text(footer,"A 上项  B 接入  C 下项 / 长按A返回");
  }else if(page==VOLUME){lv_label_set_text(title,"音量与静音");lv_label_set_text_fmt(lines[0],"扬声器音量：%d%%",a.volume);lv_label_set_text(lines[1],a.muted?"当前静音":"声音已开启");lv_label_set_text(footer,"A 减小  B 静音  C 增大 / 长按A返回");
  }else if(page==IDENTITY){lv_label_set_text(title,"设备身份");lv_label_set_text_fmt(lines[0],"呼号：M.%s",v.call);lv_label_set_text(lines[1],v.identity);lv_label_set_text(lines[2],"认证使用证书中的裸呼号");lv_label_set_text(lines[3],"私钥保留在本机");
  }else if(page==WEB){lv_label_set_text(title,"网页管理 / 配网");lv_label_set_text_fmt(lines[0],"热点：%s",v.ap);lv_label_set_text_fmt(lines[1],"热点密码 / 管理码：%s",v.code);lv_label_set_text(lines[2],"热点网页：192.168.4.1");lv_label_set_text_fmt(lines[3],"局域网：%s",v.online?v.ip:"等待联网");
@@ -154,7 +154,7 @@ void app_main(void){
  side_leds_init();
  lv_init();verify_fonts();lv_port_disp_set_rotation(0);lv_port_disp_init();
  lv_obj_set_style_bg_color(lv_scr_act(),lv_color_hex(0x0d151d),0);lv_obj_clear_flag(lv_scr_act(),LV_OBJ_FLAG_SCROLLABLE);
- brand=label("FMO / M5 FIRE  ·  0.7.18",12,8,&status_font,0x9baab8);
+ brand=label("FMO / M5 FIRE  ·  0.7.19",12,8,&status_font,0x9baab8);
  title=label("正在启动网页后台",12,32,&font20,0xf6ad74);
  for(int i=0;i<5;i++)lines[i]=label("",12,70+i*27,&status_font,0xecf2f8);
  footer=label("正在启动",12,220,&status_font,0x70d5ae);
