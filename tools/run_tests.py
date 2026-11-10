@@ -8,7 +8,7 @@ if not os.environ.get('IDF_PATH'):
 for name in ('side_leds','discovery','relay_evidence','voice_wire','mqtt_bounded_enqueue','mqtt_partial_receive','mic_calibration','device_cert','identity_transition','wifi_profiles','usb_recovery'):
  subprocess.run([sys.executable,str(root/'tests'/f'test_{name}.py')],check=True,cwd=root)
 with tempfile.TemporaryDirectory() as td:
- for name,extra in [('controls',['buttons.c']),('voice_tx',[]),('voice_dsp',[]),('utf8_name',[]),('voice_dedup',[]),('call_history',[])]:
+ for name,extra in [('controls',['buttons.c']),('voice_tx',[]),('voice_dsp',[]),('utf8_name',[]),('voice_dedup',[]),('call_history',[]),('display_idle',[])]:
   out=str(Path(td)/name)
   subprocess.run(['cc','-Wall','-Wextra','-Werror','-I'+str(root/'ui-preview-firmware/main'),str(root/'tests'/f'test_{name}.c'),*[str(root/'ui-preview-firmware/main'/p) for p in extra],'-o',out],check=True)
   subprocess.run([out],check=True)

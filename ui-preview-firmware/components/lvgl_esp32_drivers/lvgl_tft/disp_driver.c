@@ -7,6 +7,9 @@
 #include "esp_lcd_backlight.h"
 #include "sdkconfig.h"
 
+static disp_backlight_h active_backlight;
+void disp_driver_set_brightness(int percent){disp_backlight_set(active_backlight,percent);}
+
 void *disp_driver_init(void)
 {
 #if defined CONFIG_LV_TFT_DISPLAY_CONTROLLER_ILI9341
@@ -66,6 +69,7 @@ void *disp_driver_init(void)
         .channel_idx = 0 // @todo this prevents us from having two PWM controlled displays
     };
     disp_backlight_h bckl_handle = disp_backlight_new(&bckl_config);
+    active_backlight=bckl_handle;
     disp_backlight_set(bckl_handle, 100);
     return bckl_handle;
 #else

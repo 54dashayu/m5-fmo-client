@@ -5,6 +5,8 @@
 #include "esp_timer.h"
 #include "lvgl.h"
 #include "lv_port_disp.h"
+#include "disp_driver.h"
+#include "display_idle.h"
 #include "device_web.h"
 #include <assert.h>
 #include <stdarg.h>
@@ -22,6 +24,8 @@ static bool relay_glyph(uint32_t c){lv_font_glyph_dsc_t d;return lv_font_get_gly
 static lv_obj_t *title,*lines[5],*footer,*brand;
 static lv_obj_t *home,*local_call,*net,*caption,*badge,*call_label,*hint,*relay_name,*relay_id,*home_notice,*last_call,*previous_call,*b_hint,*bars[9];
 static buttons_t keys;
+static display_idle_t display_idle;
+unsigned ui_backlight_percent=100,ui_idle_seconds,ui_pressed_mask;
 unsigned ui_key_events;int ui_last_key=-1,ui_last_action=-1;
 enum {HOME,MENU,RELAYS,VOLUME,IDENTITY,WEB,MIC};
 static int page=HOME,selection=0;
@@ -150,7 +154,7 @@ void app_main(void){
  side_leds_init();
  lv_init();verify_fonts();lv_port_disp_set_rotation(0);lv_port_disp_init();
  lv_obj_set_style_bg_color(lv_scr_act(),lv_color_hex(0x0d151d),0);lv_obj_clear_flag(lv_scr_act(),LV_OBJ_FLAG_SCROLLABLE);
- brand=label("FMO / M5 FIRE  ·  0.7.17-dev",12,8,&status_font,0x9baab8);
+ brand=label("FMO / M5 FIRE  ·  0.7.18",12,8,&status_font,0x9baab8);
  title=label("正在启动网页后台",12,32,&font20,0xf6ad74);
  for(int i=0;i<5;i++)lines[i]=label("",12,70+i*27,&status_font,0xecf2f8);
  footer=label("正在启动",12,220,&status_font,0x70d5ae);
@@ -159,5 +163,5 @@ void app_main(void){
  lv_timer_handler();esp_err_t result=device_web_start();
  if(result!=ESP_OK){lv_label_set_text(title,"USB 后台启动失败");ESP_LOGE("main","init: %s",esp_err_to_name(result));}
  int pins[3]={39,38,37};uint8_t initial=0;for(int i=0;i<3;i++)if(!gpio_get_level(pins[i]))initial|=1<<i;buttons_init(&keys,initial,key,NULL);int64_t updated=0,led_updated=0;
- while(1){int64_t now=esp_timer_get_time();uint8_t pressed=0;for(int i=0;i<3;i++)if(!gpio_get_level(pins[i]))pressed|=1<<i;if(result==ESP_OK){if(now-led_updated>=25000){voice_view_t led_voice;voice_view(&led_voice);side_leds_update(led_voice.tx,led_voice.rx,now/1000);led_updated=now;}buttons_step(&keys,pressed,now/1000,page==HOME);if(now-updated>150000){refresh();updated=now;}}lv_timer_handler();vTaskDelay(pdMS_TO_TICKS(10));}
+ while(1){int64_t now=esp_timer_get_time();uint8_t pressed=0;for(int i=0;i<3;i++)if(!gpio_get_level(pins[i]))pressed|=1<<i;if(result==ESP_OK){if(now-led_updated>=25000){voice_view_t led_voice;voice_view(&led_voice);side_leds_update(led_voice.tx,led_voice.rx,now/1000);unsigned brightness=display_idle_step(&display_idle,now/1000,led_voice.tx||led_voice.rx||pressed);ui_idle_seconds=(now/1000-display_idle.last_activity)/1000;ui_pressed_mask=pressed;if(brightness!=ui_backlight_percent){disp_driver_set_brightness(brightness);ui_backlight_percent=brightness;}led_updated=now;}buttons_step(&keys,pressed,now/1000,page==HOME);if(now-updated>150000){refresh();updated=now;}}lv_timer_handler();vTaskDelay(pdMS_TO_TICKS(10));}
 }

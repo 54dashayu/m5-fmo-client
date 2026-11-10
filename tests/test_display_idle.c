@@ -1,0 +1,3 @@
+#include <assert.h>
+#include "display_idle.h"
+int main(void){display_idle_t s={0};assert(display_idle_step(&s,1000,false)==100);assert(display_idle_step(&s,300999,false)==100);assert(display_idle_step(&s,301000,false)==3);assert(display_idle_step(&s,400000,true)==100);assert(display_idle_step(&s,699999,false)==100);assert(display_idle_step(&s,700000,false)==3);assert(display_idle_step(&s,700001,true)==100);assert(display_idle_step(&s,900000,true)==100);assert(display_idle_step(&s,1199999,false)==100);assert(display_idle_step(&s,1200000,false)==3);assert(display_idle_step(&s,0,false)==100);return 0;}
