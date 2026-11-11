@@ -1,0 +1,7 @@
+#include <assert.h>
+#include <stdlib.h>
+#include "roger_beep.h"
+#include "voice_wire.h"
+int main(void){assert(roger_sample(0)==0&&roger_sample(2559)==0&&roger_sample(2560)==0);int crossings[2]={0,0};for(unsigned i=0;i<2560;i++){assert(abs(roger_sample(i))<=4000);if(i>=1120&&i<1440)assert(roger_sample(i)==0);if(i&&roger_sample(i-1)<0&&roger_sample(i)>=0)crossings[i<1440?0:1]++;}assert(crossings[0]>=69&&crossings[0]<=70);assert(crossings[1]>=139&&crossings[1]<=140);
+assert(roger_allowed(true,true,false,false,"key_or_page",10,0,0,8));assert(!roger_allowed(false,true,false,false,"key_or_page",10,0,0,8));assert(!roger_allowed(true,false,false,false,"key_or_page",10,0,0,8));assert(!roger_allowed(true,true,true,false,"key_or_page",10,0,0,8));assert(!roger_allowed(true,true,false,true,"key_or_page",10,0,0,8));assert(!roger_allowed(true,true,false,false,"time_limit",10,0,0,8));assert(!roger_allowed(true,true,false,false,"key_or_page",0,0,0,8));assert(!roger_allowed(true,true,false,false,"key_or_page",10,1,0,8));assert(!roger_allowed(true,true,false,false,"key_or_page",10,0,8,8));
+uint8_t frames[656],packet[752];int16_t pcm[640],decoded[640];int predictor=0,step=0;for(unsigned f=0;f<4;f++){for(unsigned i=0;i<640;i++)pcm[i]=roger_sample(f*640+i);radpcm_encode(pcm,frames+328*(f%2),10+f,&predictor,&step);assert(radpcm_decode(frames+328*(f%2),decoded));}size_t n=voice_pack(packet,sizeof(packet),frames,2,17910101,"BH1JSS",1791,1000,1800,11);assert(n==752);voice_packet_t v;assert(voice_parse(packet,n,&v)&&v.count==2&&v.base==1000&&v.timestamp==1800);return 0;}
