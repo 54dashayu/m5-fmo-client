@@ -1,0 +1,13 @@
+[Unit]
+Description=M5 CA verified APRS station catalog
+After=network-online.target
+[Service]
+Type=oneshot
+Environment=PYTHONPATH=/opt/fmo-m5-discovery/vendor
+ExecStart=/usr/bin/python3 /opt/fmo-m5-discovery/trusted_catalog.py
+TimeoutStartSec=35
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/fmo-discovery

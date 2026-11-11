@@ -1,0 +1,7 @@
+[Unit]
+Description=Refresh CA verified APRS stations
+[Timer]
+OnBootSec=30
+OnUnitActiveSec=60
+[Install]
+WantedBy=timers.target

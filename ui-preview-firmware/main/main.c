@@ -20,6 +20,7 @@ extern const lv_font_t font20, history_font, status_font, ui_small, ui_call, ui_
 #include "battery.h"
 #include "side_leds.h"
 #include "relays.h"
+#include "discovery.h"
 #include "utf8_name.h"
 static bool relay_glyph(uint32_t c){lv_font_glyph_dsc_t d;return lv_font_get_glyph_dsc(&relay_font,&d,c,0);}
 static lv_obj_t *title,*lines[5],*footer,*brand;
@@ -28,8 +29,9 @@ static buttons_t keys;
 static display_idle_t display_idle;
 unsigned ui_backlight_percent=100,ui_idle_seconds,ui_pressed_mask;
 unsigned ui_key_events;int ui_last_key=-1,ui_last_action=-1;
-enum {HOME,MENU,RELAYS,VOLUME,IDENTITY,WEB,MIC};
+enum {HOME,MENU,RELAYS,VOLUME,IDENTITY,WEB,MIC,DISCOVER};
 static int page=HOME,selection=0;
+static relay_t discovered_ui[DISCOVERY_MAX];static int discovered_count;static uint32_t discovered_revision;static char discovery_notice[96];
 static bool idle_started=false,was_active=false,show_clock=false;
 static int64_t idle_since;
 static char held_call[16];
@@ -107,7 +109,7 @@ static void refresh_home(const device_view_t*v,const voice_view_t*a,const relay_
  int peak=a->tx?a->mic_peak:a->rx?a->speaker_peak:0;int level=peak/1800;if(level>9)level=9;
  for(int i=0;i<9;i++){int h=i<level?5+(i%3)*4:3;lv_obj_set_pos(bars[i],247+i*5,119-h);lv_obj_set_height(bars[i],h);lv_obj_set_style_bg_color(bars[i],lv_color_hex(i<level?accent:0x35505f),0);}
 }
-static void go(int next){voice_ptt(false);voice_mic_test(false);page=next;device_management_ap(next==WEB);selection=0;buttons_block(&keys);if(next==RELAYS)selection=relays_current(NULL,NULL);if(next==MIC)voice_mic_test(true);}
+static void go(int next){voice_ptt(false);voice_mic_test(false);page=next;device_management_ap(next==WEB);selection=0;buttons_block(&keys);if(next==RELAYS)selection=relays_current(NULL,NULL);if(next==MIC)voice_mic_test(true);if(next==DISCOVER){discovered_count=discovery_list(discovered_ui,&discovered_revision);discovery_refresh();discovery_notice[0]=0;}}
 static void key(int k,key_action_t action,void*ctx){(void)ctx;ui_key_events++;ui_last_key=k;ui_last_action=action;ESP_LOGI("buttons","key=%d action=%d",k,action);
  if(action==KEY_PTT_STOP||action==KEY_CANCEL){voice_ptt(false);return;}
  if(action==KEY_PTT_START){if(page==HOME)voice_ptt(true);return;}
@@ -115,7 +117,8 @@ static void key(int k,key_action_t action,void*ctx){(void)ctx;ui_key_events++;ui
  if(action!=KEY_SHORT)return;
  if(page==HOME){if(k==0)voice_volume(-5);if(k==1)voice_toggle_ptt();if(k==2)voice_volume(5);return;}
  if(page==MENU){if(k==0)selection=(selection+6)%7;if(k==2)selection=(selection+1)%7;if(k==1){int target=selection;if(target==0)go(RELAYS);else if(target==1)go(VOLUME);else if(target==2)go(IDENTITY);else if(target==3)go(WEB);else if(target==4)voice_tone();else if(target==5)go(MIC);else go(HOME);}return;}
- if(page==RELAYS){int order[RELAY_MAX],n=relays_order(order),pos=0;for(int i=0;i<n;i++)if(order[i]==selection)pos=i;if(k==0)selection=order[(pos+n-1)%n];if(k==2)selection=order[(pos+1)%n];if(k==1&&device_select_relay(selection))go(HOME);return;}
+ if(page==RELAYS){int order[RELAY_MAX],n=relays_order(order),pos=n;for(int i=0;i<n;i++)if(order[i]==selection)pos=i;if(k==0){pos=(pos+n)%(n+1);selection=pos==n?-1:order[pos];}if(k==2){pos=(pos+1)%(n+1);selection=pos==n?-1:order[pos];}if(k==1){if(selection<0)go(DISCOVER);else if(device_select_relay(selection))go(HOME);}return;}
+ if(page==DISCOVER){int n=discovered_count+1;if(k==0)selection=(selection+n-1)%n;if(k==2)selection=(selection+1)%n;if(k==1){if(selection==discovered_count){discovery_refresh();discovered_count=discovery_list(discovered_ui,&discovered_revision);selection=0;snprintf(discovery_notice,sizeof(discovery_notice),"空闲时刷新，稍后再查看");}else{const char*error=discovery_select(selection,discovered_revision);if(!error)go(HOME);else snprintf(discovery_notice,sizeof(discovery_notice),"%s",error);}}return;}
  if(page==VOLUME){if(k==0)voice_volume(-5);if(k==2)voice_volume(5);if(k==1)voice_mute();return;}
  if(k==1)go(HOME);
 }
@@ -132,7 +135,8 @@ static void refresh(void){
  if(page==HOME){
   refresh_home(&v,&a,&relay);
  }else if(page==MENU){lv_label_set_text_fmt(title,"设备菜单  %d/2",selection/5+1);for(int i=0;i<5;i++){int n=(selection/5)*5+i;if(n<7)lv_label_set_text_fmt(lines[i],"%s %s",n==selection?">":" ",items[n]);else lv_label_set_text(lines[i],"");}lv_label_set_text(footer,"A 上项  B 确认  C 下项 / 长按A返回");
- }else if(page==RELAYS){lv_label_set_text(title,"选择中继");int order[RELAY_MAX],n=relays_order(order);for(int i=0;i<4;i++)lv_label_set_text(lines[i],"");if(selection>=n)selection=current;for(int i=0;i<n;i++){int index=order[i];relay_t r;relays_get(index,&r);char name[65];name_for_display(name,sizeof(name),r.name[0]?r.name:r.call,relay_glyph);lv_label_set_text_fmt(lines[i],"%s %s%s / %s",selection==index?">":" ",current==index?"[当前] ":"",name,r.call);}lv_label_set_text(lines[4],"在网页添加中继；通联中不能切换");lv_label_set_text(footer,"A 上项  B 接入  C 下项 / 长按A返回");
+ }else if(page==RELAYS){lv_label_set_text(title,"选择中继");int order[RELAY_MAX],n=relays_order(order);for(int i=0;i<4;i++)lv_label_set_text(lines[i],"");if(selection>=n)selection=current;for(int i=0;i<n;i++){int index=order[i];relay_t r;relays_get(index,&r);char name[65];name_for_display(name,sizeof(name),r.name[0]?r.name:r.call,relay_glyph);lv_label_set_text_fmt(lines[i],"%s %s%s / %s",selection==index?">":" ",current==index?"[当前] ":"",name,r.call);}lv_label_set_text_fmt(lines[4],"%s 发现中继 / 自动验证",selection<0?">":" ");lv_label_set_text(footer,"A 上项  B 接入  C 下项 / 长按A返回");
+ }else if(page==DISCOVER){relay_t fresh[DISCOVERY_MAX];uint32_t rev;int num=discovery_list(fresh,&rev);if(rev!=discovered_revision||num!=discovered_count){relay_t old={0};bool was_refresh=selection==discovered_count;if(selection<discovered_count)old=discovered_ui[selection];memcpy(discovered_ui,fresh,num*sizeof(relay_t));discovered_count=num;discovered_revision=rev;discovery_notice[0]=0;selection=was_refresh?num:0;for(int i=0;!was_refresh&&i<num;i++)if(fresh[i].uid==old.uid&&!strcmp(fresh[i].fingerprint,old.fingerprint))selection=i;}int total=discovered_count+1,start=selection/4*4;lv_label_set_text_fmt(title,"发现中继 %d/%d",selection/4+1,(total+3)/4);for(int i=0;i<4;i++){int p=start+i;if(p>=total)lv_label_set_text(lines[i],"");else if(p==discovered_count)lv_label_set_text_fmt(lines[i],"%s 刷新列表",selection==p?">":" ");else{char name[65];name_for_display(name,sizeof(name),discovered_ui[p].name,relay_glyph);lv_label_set_text_fmt(lines[i],"%s %s",selection==p?">":" ",name);}}char progress[96];discovery_status(progress,sizeof(progress));lv_label_set_text(lines[4],discovery_notice[0]?discovery_notice:progress);lv_label_set_text(footer,"A 上项  B 选择  C 下项 / 长按A返回");
  }else if(page==VOLUME){lv_label_set_text(title,"音量与静音");lv_label_set_text_fmt(lines[0],"扬声器音量：%d%%",a.volume);lv_label_set_text(lines[1],a.muted?"当前静音":"声音已开启");lv_label_set_text(footer,"A 减小  B 静音  C 增大 / 长按A返回");
  }else if(page==IDENTITY){lv_label_set_text(title,"设备身份");lv_label_set_text_fmt(lines[0],"呼号：M.%s",v.call);lv_label_set_text(lines[1],v.identity);lv_label_set_text(lines[2],"认证使用证书中的裸呼号");lv_label_set_text(lines[3],"私钥保留在本机");
  }else if(page==WEB){lv_label_set_text(title,"网页管理 / 配网");lv_label_set_text_fmt(lines[0],"热点：%s",v.ap);lv_label_set_text_fmt(lines[1],"热点密码 / 管理码：%s",v.code);lv_label_set_text(lines[2],"热点网页：192.168.4.1");lv_label_set_text_fmt(lines[3],"局域网：%s",v.online?v.ip:"等待联网");
@@ -157,7 +161,7 @@ void app_main(void){
  side_leds_init();battery_init();
  lv_init();verify_fonts();lv_port_disp_set_rotation(0);lv_port_disp_init();
  lv_obj_set_style_bg_color(lv_scr_act(),lv_color_hex(0x0d151d),0);lv_obj_clear_flag(lv_scr_act(),LV_OBJ_FLAG_SCROLLABLE);
- brand=label("FMO / M5 FIRE  ·  0.7.21",12,8,&status_font,0x9baab8);
+ brand=label("FMO / M5 FIRE  ·  0.7.22",12,8,&status_font,0x9baab8);
  title=label("正在启动网页后台",12,32,&font20,0xf6ad74);
  for(int i=0;i<5;i++)lines[i]=label("",12,70+i*27,&status_font,0xecf2f8);
  footer=label("正在启动",12,220,&status_font,0x70d5ae);

@@ -20,3 +20,5 @@ int relays_order(int out[RELAY_MAX]);
 const char*relays_remove(int index,const relay_t*expected);
 
 const char*relays_update_name(const cJSON*j);
+
+void relays_use_temporary(const relay_t*relay);
