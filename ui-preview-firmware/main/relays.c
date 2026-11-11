@@ -9,33 +9,88 @@
 #include <stdlib.h>
 #include <math.h>
 #include <time.h>
-static bool access_verified[RELAY_MAX];
-static int connection_result[RELAY_MAX];static time_t connection_time[RELAY_MAX];
-static bool temporary_active;static relay_t temporary;
-static relay_t rows[RELAY_MAX];static int count=1,selected=0;static uint32_t revision=1;static SemaphoreHandle_t lock;static nvs_handle_t nv;
+#include <limits.h>
+// Only small runtime evidence/index metadata is resident; records live in NVS.
+typedef struct {uint32_t id;bool verified;int result;time_t at;} entry_t;
+static entry_t *entries;
+static int count,selected;
+static uint32_t revision=1;
+static SemaphoreHandle_t lock;
+static nvs_handle_t nv;
+static bool temporary_active;
+static relay_t temporary,current_record;
+static struct {uint32_t id;relay_t value;} cache[4];
+static unsigned cache_next;
+static void invalidate(uint32_t id){for(unsigned i=0;i<4;i++)if(cache[i].id==id)cache[i].id=0;}
+#define INDEX_MAGIC 0x524c5932u
 static const char*str(const cJSON*j,const char*k){const cJSON*v=cJSON_GetObjectItemCaseSensitive(j,k);return cJSON_IsString(v)?v->valuestring:NULL;}
 static bool parse(const cJSON*j,relay_t*r){const char*n=str(j,"name"),*c=str(j,"callsign"),*h=str(j,"host"),*f=str(j,"fingerprint");const cJSON*u=cJSON_GetObjectItemCaseSensitive(j,"uid"),*p=cJSON_GetObjectItemCaseSensitive(j,"port");uint8_t fp[32];if(!n||!strlen(n)||strlen(n)>64||!name_utf8_valid(n)||!wire_callsign(c)||!h||!strlen(h)||strlen(h)>63||!wire_unb64(f,fp,32)||!cJSON_IsNumber(u)||u->valuedouble<1||u->valuedouble>4294967295.0||floor(u->valuedouble)!=u->valuedouble||!cJSON_IsNumber(p)||p->valuedouble<1||p->valuedouble>65535||floor(p->valuedouble)!=p->valuedouble)return false;for(const char*q=h;*q;q++)if(!((*q>='a'&&*q<='z')||(*q>='A'&&*q<='Z')||(*q>='0'&&*q<='9')||*q=='.'||*q=='-'))return false;for(const char*q=n;*q;q++)if((unsigned char)*q<32)return false;memset(r,0,sizeof(*r));snprintf(r->name,sizeof(r->name),"%s",n);snprintf(r->call,sizeof(r->call),"%s",c);snprintf(r->host,sizeof(r->host),"%s",h);snprintf(r->fingerprint,sizeof(r->fingerprint),"%s",f);r->uid=u->valuedouble;r->port=p->valuedouble;return true;}
-static cJSON*array(void){cJSON*a=cJSON_CreateArray();for(int i=0;i<count;i++){cJSON*j=cJSON_CreateObject();cJSON_AddStringToObject(j,"name",rows[i].name);cJSON_AddStringToObject(j,"callsign",rows[i].call);cJSON_AddStringToObject(j,"host",rows[i].host);cJSON_AddStringToObject(j,"fingerprint",rows[i].fingerprint);cJSON_AddNumberToObject(j,"uid",rows[i].uid);cJSON_AddNumberToObject(j,"port",rows[i].port);cJSON_AddBoolToObject(j,"accessVerified",access_verified[i]);cJSON_AddNumberToObject(j,"connectionResult",connection_result[i]);cJSON_AddNumberToObject(j,"connectionTime",connection_time[i]);cJSON_AddItemToArray(a,j);}return a;}
-static bool persist(void){cJSON*j=cJSON_CreateObject();if(!j)return false;cJSON_AddItemToObject(j,"relays",array());cJSON_AddNumberToObject(j,"selected",selected);char*s=cJSON_PrintUnformatted(j);cJSON_Delete(j);bool ok=s&&nvs_set_str(nv,"list",s)==ESP_OK&&nvs_commit(nv)==ESP_OK;free(s);return ok;}
-esp_err_t relays_init(void){lock=xSemaphoreCreateMutex();if(!lock)return ESP_ERR_NO_MEM;esp_err_t e=nvs_open("m5relays",NVS_READWRITE,&nv);if(e!=ESP_OK)return e;rows[0]=(relay_t){.name="机婶婶的测试台",.call="BH1JSS",.host="120.27.244.89",.fingerprint="U2IJZO1ouwf9i5gdU8WC9TU4_hOGAfZo0FxeJyy8JzI",.uid=1791,.port=28883};bool bank=false;size_t n=0;if(nvs_get_str(nv,"list",NULL,&n)==ESP_OK&&n<4096){char*buf=malloc(n);if(buf&&nvs_get_str(nv,"list",buf,&n)==ESP_OK){cJSON*doc=cJSON_Parse(buf);bank=cJSON_IsObject(doc);cJSON*a=bank?cJSON_GetObjectItemCaseSensitive(doc,"relays"):doc;int size=cJSON_GetArraySize(a);relay_t temp[RELAY_MAX];bool ok=cJSON_IsArray(a)&&size>0&&size<=RELAY_MAX;for(int i=0;ok&&i<size;i++)ok=parse(cJSON_GetArrayItem(a,i),&temp[i]);if(ok){memcpy(rows,temp,size*sizeof(relay_t));count=size;if(bank){cJSON*i=cJSON_GetObjectItemCaseSensitive(doc,"selected");if(cJSON_IsNumber(i)&&i->valueint>=0&&i->valueint<count)selected=i->valueint;}}cJSON_Delete(doc);}free(buf);}uint8_t index=0;nvs_get_u8(nv,"selected",&index);if(!bank&&index<count)selected=index;for(int i=0;i<count;i++)if(rows[i].uid==1791&&!strcmp(rows[i].call,"BH1JSS")&&!strcmp(rows[i].name,"鸡婶婶的测试台")){snprintf(rows[i].name,sizeof(rows[i].name),"机婶婶的测试台");persist();}return ESP_OK;}
+
+static bool same(const relay_t*a,const relay_t*b){return a->uid==b->uid&&a->port==b->port&&!strcmp(a->call,b->call)&&!strcmp(a->host,b->host)&&!strcmp(a->fingerprint,b->fingerprint);}
+static void record_key(uint32_t id,char key[12]){snprintf(key,12,"r%08lx",(unsigned long)id);}
+static bool load_record(uint32_t id,relay_t*out){for(unsigned i=0;i<4;i++)if(id&&cache[i].id==id){*out=cache[i].value;return true;}char key[12];record_key(id,key);size_t n=sizeof(*out);bool ok=nvs_get_blob(nv,key,out,&n)==ESP_OK&&n==sizeof(*out)&&memchr(out->name,0,sizeof(out->name))&&memchr(out->call,0,sizeof(out->call))&&memchr(out->host,0,sizeof(out->host))&&memchr(out->fingerprint,0,sizeof(out->fingerprint))&&out->uid&&out->port>0&&out->port<=65535;if(ok){unsigned slot=cache_next++%4;cache[slot].id=id;cache[slot].value=*out;}return ok;}
+
+static bool store_record(uint32_t id,const relay_t*r){invalidate(id);char key[12];record_key(id,key);return nvs_set_blob(nv,key,r,sizeof(*r))==ESP_OK&&nvs_commit(nv)==ESP_OK;}
+static void erase_record(uint32_t id){invalidate(id);char key[12];record_key(id,key);nvs_erase_key(nv,key);nvs_commit(nv);}
+static bool save_index(void){size_t n=((size_t)count+3)*sizeof(uint32_t);uint32_t*b=malloc(n);if(!b)return false;b[0]=INDEX_MAGIC;b[1]=(uint32_t)count;b[2]=(uint32_t)selected;for(int i=0;i<count;i++)b[i+3]=entries[i].id;bool ok=nvs_set_blob(nv,"index",b,n)==ESP_OK&&nvs_commit(nv)==ESP_OK;free(b);return ok;}
+static const char*append_record(const relay_t*r){
+ uint32_t id=1;for(int i=0;i<count;i++){relay_t old;if(!load_record(entries[i].id,&old))return "中继记录读取失败";if(old.uid==r->uid&&old.port==r->port&&!strcmp(old.host,r->host))return "这个中继已经存在";if(entries[i].id>=id)id=entries[i].id+1;}
+ if(!id||count==INT_MAX)return "中继索引空间不足";
+ entry_t*next=realloc(entries,((size_t)count+1)*sizeof(*entries));if(!next)return "内存暂不足，请稍后重试";entries=next;
+ if(!store_record(id,r))return "保存失败，设备存储空间可能不足";
+ entries[count++]=(entry_t){.id=id};if(!save_index()){count--;save_index();return "保存失败，原列表已保留";}return NULL;
+}
+static int ordered_at(int position){int pos=0;for(int rank=0;rank<2;rank++)for(int i=0;i<count;i++)if((entries[i].verified?0:1)==rank){if(pos++==position)return i;}return -1;}
+int relays_order_at(int position){xSemaphoreTake(lock,portMAX_DELAY);int i=ordered_at(position);xSemaphoreGive(lock);return i;}
+int relays_order_position(int index){xSemaphoreTake(lock,portMAX_DELAY);int pos=count;if(index>=0&&index<count){pos=0;for(int i=0;i<count;i++)if((entries[i].verified&&!entries[index].verified)||(entries[i].verified==entries[index].verified&&i<index))pos++;}xSemaphoreGive(lock);return pos;}
+esp_err_t relays_init(void){
+ memset(cache,0,sizeof(cache));cache_next=0;lock=xSemaphoreCreateMutex();if(!lock)return ESP_ERR_NO_MEM;
+ esp_err_t e=nvs_open("m5relay2",NVS_READWRITE,&nv);if(e!=ESP_OK)return e;
+ size_t size=0;e=nvs_get_blob(nv,"index",NULL,&size);
+ if(e==ESP_OK){
+  if(size<16||size%4)return ESP_ERR_INVALID_STATE;
+  uint32_t*b=malloc(size);if(!b)return ESP_ERR_NO_MEM;
+  bool ok=nvs_get_blob(nv,"index",b,&size)==ESP_OK&&b[0]==INDEX_MAGIC&&b[1]>0&&b[1]<INT_MAX&&size==((size_t)b[1]+3)*4&&b[2]<b[1];
+  if(!ok){free(b);return ESP_ERR_INVALID_STATE;}
+  count=(int)b[1];selected=(int)b[2];entries=calloc((size_t)count,sizeof(*entries));if(!entries){free(b);return ESP_ERR_NO_MEM;}
+  relay_t r;for(int i=0;i<count;i++){entries[i].id=b[i+3];if(!load_record(entries[i].id,&r)){free(b);return ESP_ERR_INVALID_STATE;}for(int k=0;k<i;k++)if(entries[k].id==entries[i].id){free(b);return ESP_ERR_INVALID_STATE;}}
+  free(b);return load_record(entries[selected].id,&current_record)?ESP_OK:ESP_ERR_INVALID_STATE;
+ }
+ if(e!=ESP_ERR_NVS_NOT_FOUND)return e;
+ // Migrate old JSON once; retain its original namespace for rollback/recovery.
+ nvs_handle_t legacy;bool imported=false;
+ e=nvs_open("m5relays",NVS_READONLY,&legacy);
+ if(e==ESP_OK){size_t n=0;esp_err_t found=nvs_get_str(legacy,"list",NULL,&n);if(found==ESP_OK){
+  char*buf=malloc(n);if(!buf){nvs_close(legacy);return ESP_ERR_NO_MEM;}
+  if(nvs_get_str(legacy,"list",buf,&n)!=ESP_OK){free(buf);nvs_close(legacy);return ESP_ERR_INVALID_STATE;}
+  cJSON*doc=cJSON_Parse(buf);free(buf);bool bank=cJSON_IsObject(doc);cJSON*a=bank?cJSON_GetObjectItemCaseSensitive(doc,"relays"):doc;int total=cJSON_GetArraySize(a);bool ok=cJSON_IsArray(a)&&total>0;
+  entries=ok?calloc((size_t)total,sizeof(*entries)):NULL;if(!entries)ok=false;
+  for(int i=0;ok&&i<total;i++){relay_t r;ok=parse(cJSON_GetArrayItem(a,i),&r);if(ok){entries[i].id=(uint32_t)i+1;ok=store_record(entries[i].id,&r);}}
+  if(ok){count=total;selected=0;uint8_t old_selected=0;nvs_get_u8(legacy,"selected",&old_selected);if(old_selected<count)selected=old_selected;if(bank){const cJSON*v=cJSON_GetObjectItemCaseSensitive(doc,"selected");if(cJSON_IsNumber(v)&&v->valueint>=0&&v->valueint<count)selected=v->valueint;}ok=save_index();}
+  cJSON_Delete(doc);if(!ok){nvs_close(legacy);return ESP_FAIL;}imported=true;
+ }else if(found!=ESP_ERR_NVS_NOT_FOUND){nvs_close(legacy);return found;}nvs_close(legacy);
+ }else if(e!=ESP_ERR_NVS_NOT_FOUND)return e;
+ if(!imported){relay_t first={.name="机婶婶的测试台",.call="BH1JSS",.host="120.27.244.89",.fingerprint="U2IJZO1ouwf9i5gdU8WC9TU4_hOGAfZo0FxeJyy8JzI",.uid=1791,.port=28883};if(append_record(&first))return ESP_FAIL;}
+ return load_record(entries[selected].id,&current_record)?ESP_OK:ESP_ERR_INVALID_STATE;
+}
 int relays_count(void){xSemaphoreTake(lock,portMAX_DELAY);int n=count;xSemaphoreGive(lock);return n;}
-bool relays_get(int i,relay_t*out){xSemaphoreTake(lock,portMAX_DELAY);bool ok=i>=0&&i<count;if(ok)*out=rows[i];xSemaphoreGive(lock);return ok;}
-int relays_current(relay_t*out,uint32_t*rev){xSemaphoreTake(lock,portMAX_DELAY);if(out)*out=temporary_active?temporary:rows[selected];if(rev)*rev=revision;int i=temporary_active?-1:selected;xSemaphoreGive(lock);return i;}
-bool relays_select(int i){xSemaphoreTake(lock,portMAX_DELAY);bool ok=i>=0&&i<count;if(ok&&(i!=selected||temporary_active)){int old=selected;selected=i;ok=persist();if(ok){temporary_active=false;revision++;}else selected=old;}xSemaphoreGive(lock);return ok;}
+bool relays_get(int i,relay_t*out){xSemaphoreTake(lock,portMAX_DELAY);bool ok=i>=0&&i<count&&load_record(entries[i].id,out);xSemaphoreGive(lock);return ok;}
+int relays_current(relay_t*out,uint32_t*rev){xSemaphoreTake(lock,portMAX_DELAY);if(out)*out=temporary_active?temporary:current_record;if(rev)*rev=revision;int i=temporary_active?-1:selected;xSemaphoreGive(lock);return i;}
+bool relays_select(int i){xSemaphoreTake(lock,portMAX_DELAY);relay_t next;bool ok=i>=0&&i<count&&load_record(entries[i].id,&next);if(ok&&(i!=selected||temporary_active)){int old=selected;selected=i;ok=save_index();if(ok){temporary_active=false;current_record=next;revision++;}else{selected=old;save_index();}}xSemaphoreGive(lock);return ok;}
 void relays_use_temporary(const relay_t*r){xSemaphoreTake(lock,portMAX_DELAY);temporary=*r;temporary_active=true;revision++;xSemaphoreGive(lock);}
-cJSON*relays_json(void){xSemaphoreTake(lock,portMAX_DELAY);cJSON*j=cJSON_CreateObject();cJSON_AddItemToObject(j,"relays",array());cJSON_AddNumberToObject(j,"selected",temporary_active?-1:selected);cJSON_AddBoolToObject(j,"temporary",temporary_active);xSemaphoreGive(lock);return j;}
-const char*relays_add(const cJSON*j){relay_t r;if(!parse(j,&r))return "中继信息无效，请核对地址、呼号、UID 和指纹";xSemaphoreTake(lock,portMAX_DELAY);const char*error=NULL;if(count>=RELAY_MAX)error="最多保存四个中继";for(int i=0;!error&&i<count;i++)if(rows[i].uid==r.uid&&!strcmp(rows[i].host,r.host)&&rows[i].port==r.port)error="这个中继已经存在";if(!error){rows[count]=r;access_verified[count]=false;connection_result[count]=0;connection_time[count]=0;count++;if(!persist()){count--;error="保存中继失败";}}xSemaphoreGive(lock);return error;}
-
-const char*relays_update_name(const cJSON*j){relay_t fresh;if(!parse(j,&fresh))return "中继资料无效";xSemaphoreTake(lock,portMAX_DELAY);const char*err="中继身份不匹配，请刷新";for(int i=0;i<count;i++)if(rows[i].uid==fresh.uid&&rows[i].port==fresh.port&&!strcmp(rows[i].call,fresh.call)&&!strcmp(rows[i].host,fresh.host)&&!strcmp(rows[i].fingerprint,fresh.fingerprint)){char old[65];memcpy(old,rows[i].name,sizeof(old));err=NULL;if(strcmp(old,fresh.name)){memcpy(rows[i].name,fresh.name,sizeof(old));if(!persist()){memcpy(rows[i].name,old,sizeof(old));err="名称保存失败";}}break;}xSemaphoreGive(lock);return err;}
-void relays_connection(const relay_t*t,bool success){xSemaphoreTake(lock,portMAX_DELAY);for(int i=0;i<count;i++)if(rows[i].uid==t->uid&&rows[i].port==t->port&&!strcmp(rows[i].host,t->host)&&!strcmp(rows[i].fingerprint,t->fingerprint)){if(success)access_verified[i]=true;connection_result[i]=success?1:2;connection_time[i]=time(NULL);}xSemaphoreGive(lock);}
-void relays_clear_evidence(void){xSemaphoreTake(lock,portMAX_DELAY);memset(access_verified,0,sizeof(access_verified));memset(connection_result,0,sizeof(connection_result));memset(connection_time,0,sizeof(connection_time));xSemaphoreGive(lock);}
-
-int relays_order(int out[RELAY_MAX]){xSemaphoreTake(lock,portMAX_DELAY);int n=0;for(int rank=0;rank<2;rank++)for(int i=0;i<count;i++)if((access_verified[i]?0:1)==rank)out[n++]=i;xSemaphoreGive(lock);return n;}
-const char*relays_remove(int i,const relay_t*expected){xSemaphoreTake(lock,portMAX_DELAY);const char*err=NULL;
-if(i<0||i>=count||!expected||rows[i].uid!=expected->uid||rows[i].port!=expected->port||strcmp(rows[i].host,expected->host)||strcmp(rows[i].fingerprint,expected->fingerprint))err="列表已变化，请刷新后重试";
-else if(i==selected)err="请先切换到其他中继，再删除当前中继";
-else if(count<=1)err="至少保留一个中继";
-else{relay_t backup[RELAY_MAX];int results[RELAY_MAX];time_t times[RELAY_MAX];bool verified[RELAY_MAX];memcpy(backup,rows,sizeof(rows));memcpy(results,connection_result,sizeof(results));memcpy(times,connection_time,sizeof(times));memcpy(verified,access_verified,sizeof(verified));int old_selected=selected,old_count=count;
-for(int k=i;k<count-1;k++){rows[k]=rows[k+1];connection_result[k]=connection_result[k+1];connection_time[k]=connection_time[k+1];access_verified[k]=access_verified[k+1];}count--;if(selected>i)selected--;
-if(!persist()){memcpy(rows,backup,sizeof(rows));memcpy(connection_result,results,sizeof(results));memcpy(connection_time,times,sizeof(times));memcpy(access_verified,verified,sizeof(verified));selected=old_selected;count=old_count;err="保存失败，未删除中继";}
-}xSemaphoreGive(lock);return err;}
+static cJSON*row_json(int i,const relay_t*r){cJSON*j=cJSON_CreateObject();cJSON_AddStringToObject(j,"name",r->name);cJSON_AddStringToObject(j,"callsign",r->call);cJSON_AddStringToObject(j,"host",r->host);cJSON_AddStringToObject(j,"fingerprint",r->fingerprint);cJSON_AddNumberToObject(j,"uid",r->uid);cJSON_AddNumberToObject(j,"port",r->port);cJSON_AddNumberToObject(j,"index",i);cJSON_AddBoolToObject(j,"accessVerified",entries[i].verified);cJSON_AddNumberToObject(j,"connectionResult",entries[i].result);cJSON_AddNumberToObject(j,"connectionTime",entries[i].at);return j;}
+cJSON*relays_json_page(int offset){xSemaphoreTake(lock,portMAX_DELAY);if(offset<0)offset=0;if(offset>=count)offset=(count-1)/RELAY_PAGE_SIZE*RELAY_PAGE_SIZE;cJSON*j=cJSON_CreateObject(),*a=cJSON_AddArrayToObject(j,"relays");for(int p=offset;p<count&&p<offset+RELAY_PAGE_SIZE;p++){int i=ordered_at(p);relay_t r;if(load_record(entries[i].id,&r))cJSON_AddItemToArray(a,row_json(i,&r));}cJSON_AddNumberToObject(j,"selected",temporary_active?-1:selected);cJSON_AddBoolToObject(j,"temporary",temporary_active);cJSON_AddNumberToObject(j,"total",count);cJSON_AddNumberToObject(j,"offset",offset);cJSON_AddNumberToObject(j,"pageSize",RELAY_PAGE_SIZE);xSemaphoreGive(lock);return j;}
+cJSON*relays_json(void){return relays_json_page(0);}
+const char*relays_add(const cJSON*j){relay_t r;if(!parse(j,&r))return "中继信息无效，请核对地址、呼号、UID 和指纹";xSemaphoreTake(lock,portMAX_DELAY);const char*error=append_record(&r);xSemaphoreGive(lock);return error;}
+const char*relays_update_name(const cJSON*j){relay_t fresh;if(!parse(j,&fresh))return "中继资料无效";xSemaphoreTake(lock,portMAX_DELAY);const char*error="中继身份不匹配，请刷新";for(int i=0;i<count;i++){relay_t old;if(load_record(entries[i].id,&old)&&same(&old,&fresh)){error=NULL;if(strcmp(old.name,fresh.name)){if(!store_record(entries[i].id,&fresh)){store_record(entries[i].id,&old);error="名称保存失败";}else if(i==selected)current_record=fresh;}break;}}xSemaphoreGive(lock);return error;}
+void relays_connection(const relay_t*t,bool success){xSemaphoreTake(lock,portMAX_DELAY);for(int i=0;i<count;i++){relay_t r;if(load_record(entries[i].id,&r)&&same(&r,t)){if(success)entries[i].verified=true;entries[i].result=success?1:2;entries[i].at=time(NULL);}}xSemaphoreGive(lock);}
+bool relays_verified(const relay_t*t){xSemaphoreTake(lock,portMAX_DELAY);bool ok=false;for(int i=0;i<count;i++)if(entries[i].verified){relay_t r;if(load_record(entries[i].id,&r)&&same(&r,t)){ok=true;break;}}xSemaphoreGive(lock);return ok;}
+void relays_clear_evidence(void){xSemaphoreTake(lock,portMAX_DELAY);for(int i=0;i<count;i++){entries[i].verified=false;entries[i].result=0;entries[i].at=0;}xSemaphoreGive(lock);}
+const char*relays_remove(int i,const relay_t*expected){xSemaphoreTake(lock,portMAX_DELAY);const char*error=NULL;relay_t r;
+ if(i<0||i>=count||!expected||!load_record(entries[i].id,&r)||r.uid!=expected->uid||r.port!=expected->port||strcmp(r.host,expected->host)||strcmp(r.fingerprint,expected->fingerprint))error="列表已变化，请刷新后重试";
+ else if(i==selected)error="请先切换到其他中继，再删除当前中继";
+ else if(count<=1)error="至少保留一个中继";
+ else{entry_t removed=entries[i];int old_selected=selected;memmove(entries+i,entries+i+1,(count-i-1)*sizeof(*entries));count--;if(selected>i)selected--;
+  if(!save_index()){memmove(entries+i+1,entries+i,(count-i)*sizeof(*entries));entries[i]=removed;count++;selected=old_selected;save_index();error="保存失败，未删除中继";}else erase_record(removed.id);
+ }xSemaphoreGive(lock);return error;
+}

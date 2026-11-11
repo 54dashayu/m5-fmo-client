@@ -22,6 +22,7 @@
 
 typedef struct {relay_t relay;time_t verified,attempted,seen;} candidate_t;
 static candidate_t rows[DISCOVERY_MAX];
+static uint32_t checking_uid;
 static int count;static uint32_t revision=1;static time_t updated;
 static SemaphoreHandle_t mutex,allocation_lock;
 static atomic_bool refresh=true,owner_valid=false;
@@ -85,16 +86,16 @@ static bool probe(const relay_t*t,const char*expected_owner){
 void discovery_tick(void){static int64_t next_fetch=0,next_probe=0,idle_since=0;
  if(!mutex)return;
  char actual[65];if(!current_owner(actual)){atomic_store(&owner_valid,false);idle_since=0;return;}atomic_store(&owner_valid,true);
- xSemaphoreTake(mutex,portMAX_DELAY);if(strcmp(owner,actual)){snprintf(owner,sizeof(owner),"%s",actual);for(int i=0;i<count;i++)rows[i].verified=rows[i].attempted=0;revision++;}xSemaphoreGive(mutex);
+ xSemaphoreTake(mutex,portMAX_DELAY);if(strcmp(owner,actual)){snprintf(owner,sizeof(owner),"%s",actual);for(int i=0;i<count;i++)rows[i].verified=rows[i].attempted=0;checking_uid=0;revision++;}xSemaphoreGive(mutex);
  int64_t now=esp_timer_get_time();if(voice_busy()){idle_since=0;return;}if(!idle_since)idle_since=now;if(now-idle_since<10000000)return;
  if(now>=next_fetch||atomic_exchange(&refresh,false)){xSemaphoreTake(allocation_lock,portMAX_DELAY);bool fetched=fetch_catalog();xSemaphoreGive(allocation_lock);if(!fetched)status("目录暂不可用，保留已保存中继");next_fetch=now+120000000;}
  if(now<next_probe||voice_busy())return;
  next_probe=now+60000000;
  relay_t target,current;relays_current(&current,NULL);int slot=-1;time_t wall=time(NULL);
- xSemaphoreTake(mutex,portMAX_DELAY);for(int i=0;i<count;i++)if(wall-rows[i].seen<1200&&(!rows[i].attempted||wall-rows[i].attempted>=1800)){slot=i;target=rows[i].relay;rows[i].attempted=wall;break;}xSemaphoreGive(mutex);if(slot<0)return;
+ xSemaphoreTake(mutex,portMAX_DELAY);for(int i=0;i<count;i++)if(wall-rows[i].seen<1200&&(!rows[i].attempted||wall-rows[i].attempted>=1800)){slot=i;target=rows[i].relay;rows[i].attempted=wall;checking_uid=target.uid;break;}xSemaphoreGive(mutex);if(slot<0)return;
  char progress[96];snprintf(progress,sizeof(progress),"接入验证 %d/%d",slot+1,count);status(progress);
- bool ok=false;if(same(&target,&current)){cJSON*j=relays_json(),*a=cJSON_GetObjectItemCaseSensitive(j,"relays"),*v;cJSON_ArrayForEach(v,a){cJSON*u=cJSON_GetObjectItemCaseSensitive(v,"uid");if(cJSON_IsNumber(u)&&u->valuedouble==target.uid&&cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(v,"accessVerified")))ok=true;}cJSON_Delete(j);}else if(!same_broker(&target,&current)&&!voice_busy())ok=probe(&target,actual);
- char after[65];if(!current_owner(after)||strcmp(actual,after))return;
+ bool ok=false;if(same(&target,&current)){ok=relays_verified(&target);}else if(!same_broker(&target,&current)&&!voice_busy())ok=probe(&target,actual);
+ char after[65];bool unchanged=current_owner(after)&&!strcmp(actual,after);xSemaphoreTake(mutex,portMAX_DELAY);checking_uid=0;xSemaphoreGive(mutex);if(!unchanged)return;
  xSemaphoreTake(mutex,portMAX_DELAY);if(slot<count&&same(&rows[slot].relay,&target)){rows[slot].verified=ok?wall:0;revision++;snprintf(message,sizeof(message),ok?"本机接入已验证 · %d/%d":"接入验证 · %d/%d",slot+1,count);}xSemaphoreGive(mutex);
 }
 esp_err_t discovery_start(discovery_identity_fn fn,SemaphoreHandle_t shared){identity=fn;allocation_lock=shared;mutex=xSemaphoreCreateMutex();return mutex?ESP_OK:ESP_ERR_NO_MEM;}
@@ -102,7 +103,39 @@ void discovery_status(char*out,size_t size){if(!mutex){snprintf(out,size,"等待
 void discovery_refresh(void){atomic_store(&refresh,true);}
 int discovery_list(relay_t out[DISCOVERY_MAX],uint32_t*rev){if(!mutex)return 0;xSemaphoreTake(mutex,portMAX_DELAY);int n=0;if(atomic_load(&owner_valid))for(int i=0;i<count;i++)if(usable(&rows[i],time(NULL)))out[n++]=rows[i].relay;if(rev)*rev=revision;xSemaphoreGive(mutex);return n;}
 const char*discovery_select(int i,uint32_t rev){relay_t list[DISCOVERY_MAX];uint32_t current;int n=discovery_list(list,&current);if(voice_busy())return "通联中不能切换";char actual[65];if(!current_owner(actual))return "设备身份或网络尚未就绪";xSemaphoreTake(mutex,portMAX_DELAY);bool match=!strcmp(actual,owner);xSemaphoreGive(mutex);if(!match)return "身份已变化，请等待重新验证";if(rev!=current||i<0||i>=n)return "列表已更新，请重新选择";
- for(int k=0;k<relays_count();k++){relay_t r;relays_get(k,&r);if(same(&r,&list[i]))return relays_select(k)?NULL:"保存失败";}
- if(relays_count()>=RELAY_MAX){relays_use_temporary(&list[i]);return NULL;}
- cJSON*j=cJSON_CreateObject();cJSON_AddStringToObject(j,"name",list[i].name);cJSON_AddStringToObject(j,"callsign",list[i].call);cJSON_AddStringToObject(j,"host",list[i].host);cJSON_AddStringToObject(j,"fingerprint",list[i].fingerprint);cJSON_AddNumberToObject(j,"uid",list[i].uid);cJSON_AddNumberToObject(j,"port",list[i].port);const char*error=relays_add(j);cJSON_Delete(j);if(error)return error;for(int k=0;k<relays_count();k++){relay_t r;relays_get(k,&r);if(same(&r,&list[i]))return relays_select(k)?NULL:"保存失败";}return "保存失败";}
-cJSON*discovery_json(void){relay_t list[DISCOVERY_MAX];uint32_t rev;int n=discovery_list(list,&rev);cJSON*j=cJSON_CreateObject(),*a=cJSON_AddArrayToObject(j,"servers");cJSON_AddNumberToObject(j,"revision",rev);xSemaphoreTake(mutex,portMAX_DELAY);cJSON_AddStringToObject(j,"message",message);cJSON_AddNumberToObject(j,"candidates",count);xSemaphoreGive(mutex);for(int i=0;i<n;i++){cJSON*v=cJSON_CreateObject();cJSON_AddStringToObject(v,"name",list[i].name);cJSON_AddStringToObject(v,"callsign",list[i].call);cJSON_AddNumberToObject(v,"uid",list[i].uid);cJSON_AddItemToArray(a,v);}return j;}
+ for(int k=0;k<relays_count();k++){relay_t r;if(!relays_get(k,&r))continue;if(same(&r,&list[i]))return relays_select(k)?NULL:"保存失败";}
+ cJSON*j=cJSON_CreateObject();cJSON_AddStringToObject(j,"name",list[i].name);cJSON_AddStringToObject(j,"callsign",list[i].call);cJSON_AddStringToObject(j,"host",list[i].host);cJSON_AddStringToObject(j,"fingerprint",list[i].fingerprint);cJSON_AddNumberToObject(j,"uid",list[i].uid);cJSON_AddNumberToObject(j,"port",list[i].port);const char*error=relays_add(j);cJSON_Delete(j);if(error)return error;for(int k=0;k<relays_count();k++){relay_t r;if(!relays_get(k,&r))continue;if(same(&r,&list[i]))return relays_select(k)?NULL:"保存失败";}return "保存失败";}
+// Save a fresh, signed candidate without switching or asserting login success.
+const char*discovery_add(int i,uint32_t rev){
+ if(voice_busy())return "通联中不能添加，请稍后重试";
+ relay_t target;time_t now=time(NULL);const char*error=NULL;
+ xSemaphoreTake(mutex,portMAX_DELAY);
+ if(rev!=revision||i<0||i>=count)error="列表已更新，请刷新后重试";
+ else if(now<rows[i].seen||now-rows[i].seen>=1200||now<updated||now-updated>=600)error="广播资料已过期，请刷新后重试";
+ else target=rows[i].relay;
+ xSemaphoreGive(mutex);if(error)return error;
+ cJSON*j=cJSON_CreateObject();if(!j)return "内存暂不足，请稍后重试";
+ cJSON_AddStringToObject(j,"name",target.name);cJSON_AddStringToObject(j,"callsign",target.call);cJSON_AddStringToObject(j,"host",target.host);cJSON_AddStringToObject(j,"fingerprint",target.fingerprint);cJSON_AddNumberToObject(j,"uid",target.uid);cJSON_AddNumberToObject(j,"port",target.port);
+ error=relays_add(j);cJSON_Delete(j);return error;
+}
+static const char*candidate_status(candidate_t*c,time_t now,bool owned){
+ if(now<c->seen||now-c->seen>=1200||now<updated||now-updated>=600)return "stale";
+ if(!owned)return "pending";
+ if(usable(c,now))return "verified";
+ if(checking_uid==c->relay.uid)return "checking";
+ return c->attempted?"unconfirmed":"pending";
+}
+static cJSON*node_json(const relay_t*r){cJSON*v=cJSON_CreateObject();cJSON_AddStringToObject(v,"name",r->name);cJSON_AddStringToObject(v,"callsign",r->call);cJSON_AddNumberToObject(v,"uid",r->uid);return v;}
+cJSON*discovery_json(void){
+ cJSON*j=cJSON_CreateObject(),*a=cJSON_AddArrayToObject(j,"servers"),*all=cJSON_AddArrayToObject(j,"candidateServers");int indexes[DISCOVERY_MAX];
+ xSemaphoreTake(mutex,portMAX_DELAY);time_t now=time(NULL);bool owned=atomic_load(&owner_valid);int verified=0;
+ cJSON_AddNumberToObject(j,"revision",revision);cJSON_AddStringToObject(j,"message",message);cJSON_AddNumberToObject(j,"candidates",count);
+ for(int i=0;i<count;i++){indexes[i]=-1;if(!strcmp(candidate_status(&rows[i],now,owned),"verified")){indexes[i]=verified++;cJSON_AddItemToArray(a,node_json(&rows[i].relay));}}
+ // Only broadcast candidates; selection requires successful device authentication.
+ const char*order[]={"verified","checking","pending","unconfirmed","stale"};
+ for(unsigned rank=0;rank<5;rank++)for(int i=0;i<count;i++){
+  const char*state=candidate_status(&rows[i],now,owned);if(strcmp(state,order[rank]))continue;
+  cJSON*v=node_json(&rows[i].relay);cJSON_AddStringToObject(v,"state",state);cJSON_AddNumberToObject(v,"selectIndex",indexes[i]);cJSON_AddNumberToObject(v,"addIndex",strcmp(state,"stale")?i:-1);cJSON_AddItemToArray(all,v);
+ }
+ xSemaphoreGive(mutex);return j;
+}

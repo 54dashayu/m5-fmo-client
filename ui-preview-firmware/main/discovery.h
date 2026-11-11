@@ -13,3 +13,5 @@ cJSON *discovery_json(void);
 void discovery_tick(void);
 
 void discovery_status(char *out,size_t size);
+
+const char *discovery_add(int index,uint32_t revision);
