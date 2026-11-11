@@ -17,12 +17,13 @@ extern const lv_font_t font20, history_font, status_font, ui_small, ui_call, ui_
 #include "fonts/coverage.h"
 #include "buttons.h"
 #include "voice.h"
+#include "battery.h"
 #include "side_leds.h"
 #include "relays.h"
 #include "utf8_name.h"
 static bool relay_glyph(uint32_t c){lv_font_glyph_dsc_t d;return lv_font_get_glyph_dsc(&relay_font,&d,c,0);}
 static lv_obj_t *title,*lines[5],*footer,*brand;
-static lv_obj_t *home,*local_call,*net,*caption,*badge,*call_label,*hint,*relay_name,*relay_id,*home_notice,*last_call,*previous_call,*b_hint,*bars[9];
+static lv_obj_t *home,*battery_label,*battery_fill,*local_call,*net,*caption,*badge,*call_label,*hint,*relay_name,*relay_id,*home_notice,*last_call,*previous_call,*b_hint,*bars[9];
 static buttons_t keys;
 static display_idle_t display_idle;
 unsigned ui_backlight_percent=100,ui_idle_seconds,ui_pressed_mask;
@@ -49,9 +50,10 @@ static lv_obj_t *home_label(const char*t,int x,int y,int w,const lv_font_t*f,uin
 static void build_home(void){
  home=box(lv_scr_act(),0,0,320,240,0x0b151c,0);
  home_label("FMO / M5",12,8,72,&status_font,0xd4e4eb);
- local_call=home_label("--",90,8,158,&status_font,0x7ec9ff);
+ local_call=home_label("--",90,8,102,&status_font,0x7ec9ff);
  lv_label_set_long_mode(local_call,LV_LABEL_LONG_SCROLL_CIRCULAR);
- net=home_label("Wi-Fi",250,9,58,&ui_small,0xb4c7d2);lv_obj_set_style_text_align(net,LV_TEXT_ALIGN_RIGHT,0);
+ net=home_label("Wi-Fi",198,9,38,&ui_small,0xb4c7d2);lv_obj_set_style_text_align(net,LV_TEXT_ALIGN_RIGHT,0);
+ lv_obj_t*battery_box=box(home,242,11,22,12,0x0b151c,2);lv_obj_set_style_border_width(battery_box,1,0);lv_obj_set_style_border_color(battery_box,lv_color_hex(0x9cb2bf),0);box(home,264,14,2,6,0x9cb2bf,1);battery_fill=box(home,244,13,18,8,0x58d6b2,1);battery_label=home_label("--",269,9,40,&ui_small,0xb4c7d2);
  lv_obj_t*card=box(home,10,32,300,93,0x14232d,12);lv_obj_set_style_border_width(card,1,0);lv_obj_set_style_border_color(card,lv_color_hex(0x263b48),0);
  caption=home_label("我的呼号",23,43,180,&ui_small,0xb4c7d2);
  badge=home_label("未接入",240,42,58,&ui_small,0xa8b5bf);lv_obj_set_style_text_align(badge,LV_TEXT_ALIGN_CENTER,0);lv_obj_set_style_bg_opa(badge,LV_OPA_COVER,0);lv_obj_set_style_bg_color(badge,lv_color_hex(0x263139),0);lv_obj_set_style_radius(badge,9,0);lv_obj_set_style_pad_ver(badge,3,0);
@@ -78,7 +80,8 @@ static void build_home(void){
 static void refresh_home(const device_view_t*v,const voice_view_t*a,const relay_t*r){
  uint32_t accent=a->tx?0xffb778:a->rx?0x7ec9ff:v->mqtt_online?0x58d6b2:0xa8b5bf;
  uint32_t tint=a->tx?0x3b2a20:a->rx?0x193348:v->mqtt_online?0x12352f:0x263139;
- lv_label_set_text_fmt(local_call,"本机：M.%s",v->call);
+ int percent;bool charging;battery_view(&percent,&charging);if(percent<0)lv_label_set_text(battery_label,"--");else lv_label_set_text_fmt(battery_label,"%d%%%s",percent,charging?"+":"");if(percent<=0)lv_obj_add_flag(battery_fill,LV_OBJ_FLAG_HIDDEN);else{lv_obj_clear_flag(battery_fill,LV_OBJ_FLAG_HIDDEN);lv_obj_set_width(battery_fill,(18*percent+99)/100);}lv_obj_set_style_bg_color(battery_fill,lv_color_hex(charging?0x5ceaff:percent<=25?0xff7766:0x58d6b2),0);
+ lv_label_set_text_fmt(local_call,"M.%s",v->call);
  lv_label_set_text(net,v->online?"Wi-Fi":"未联网");
  lv_obj_set_style_text_color(net,lv_color_hex(v->online?0x58d6b2:0xffb778),0);
  lv_label_set_text(caption,a->rx&&!a->tx?"当前通联 · 对方呼号":a->tx?"当前通联 · 本机发话":show_clock?"北京时间":"最近通联");
@@ -151,10 +154,10 @@ static void verify_fonts(void){
 }
 void app_main(void){
  gpio_config_t cfg={.pin_bit_mask=(1ULL<<39)|(1ULL<<38)|(1ULL<<37),.mode=GPIO_MODE_INPUT};ESP_ERROR_CHECK(gpio_config(&cfg));
- side_leds_init();
+ side_leds_init();battery_init();
  lv_init();verify_fonts();lv_port_disp_set_rotation(0);lv_port_disp_init();
  lv_obj_set_style_bg_color(lv_scr_act(),lv_color_hex(0x0d151d),0);lv_obj_clear_flag(lv_scr_act(),LV_OBJ_FLAG_SCROLLABLE);
- brand=label("FMO / M5 FIRE  ·  0.7.19",12,8,&status_font,0x9baab8);
+ brand=label("FMO / M5 FIRE  ·  0.7.20",12,8,&status_font,0x9baab8);
  title=label("正在启动网页后台",12,32,&font20,0xf6ad74);
  for(int i=0;i<5;i++)lines[i]=label("",12,70+i*27,&status_font,0xecf2f8);
  footer=label("正在启动",12,220,&status_font,0x70d5ae);
