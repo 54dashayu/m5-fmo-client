@@ -1,12 +1,14 @@
 # 编译、刷机与升级
 
+维护者发布正式版必须遵守[发布流程与门禁](RELEASE.md)：GitHub 主机测试和固件构建全部通过后，才能发布正式版并更新在线刷写页面。本地编译成功不等于满足发布条件。
+
 ## 在线刷写（电脑 USB）
 
 打开 [在线刷写工具](https://app.bh1jss.net/m5-flasher/)，使用电脑 Chrome / Edge，确认硬件后选择“保留配置升级”或“首次安装”。升级会检查分区并只写应用，下载验 SHA256、写入验 MD5。手机浏览器用于刷完后的配网。浏览器真实 USB 刷写仍待实机验收，可使用下方已验证的命令行方式。
 
 ## 下载预编译版
 
-在 [GitHub Releases](https://github.com/54dashayu/m5-fmo-client/releases/latest) 下载 v0.7.25 的 `m5-fmo-client-v0.7.25.zip`，解压并核对 `SHA256SUMS`。包内是通用程序，不包含 Wi‑Fi、设备私钥或用户证书。
+在 [GitHub Releases](https://github.com/54dashayu/m5-fmo-client/releases/latest) 下载 v0.7.26 的 `m5-fmo-client-v0.7.26.zip`，解压并核对 `SHA256SUMS`。包内是通用程序，不包含 Wi‑Fi、设备私钥或用户证书。
 
 需安装 Python 和 esptool：
 
@@ -25,7 +27,7 @@ python -m esptool --help
 
 ```sh
 python -m esptool --chip esp32 --port PORT --baud 115200 write_flash \
-  0x10000 m5-fmo-client-v0.7.25-app.bin
+  0x10000 m5-fmo-client-v0.7.26-app.bin
 ```
 
 此方式保留 NVS 中的 Wi‑Fi、设备密钥、证书和设置。仅适用于已有兼容分区、应用起始地址为 `0x10000` 且空间至少 3 MB 的设备。刷写结束必须看到校验成功；中途断线应重新完成刷写。
@@ -39,7 +41,7 @@ python -m esptool --chip esp32 --port PORT --baud 115200 write_flash \
   --flash_mode dio --flash_freq 80m --flash_size 4MB \
   0x1000 bootloader.bin \
   0x8000 partition-table.bin \
-  0x10000 m5-fmo-client-v0.7.25-app.bin
+  0x10000 m5-fmo-client-v0.7.26-app.bin
 ```
 
 这使用 16 MB 硬件中的前 4 MB，不意味着硬件只有 4 MB。首次安装路径经过构建和分区检查；本次现有设备验收采用应用区升级，没有为了发布而清空实机做全新安装。

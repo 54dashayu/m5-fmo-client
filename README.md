@@ -2,9 +2,11 @@
 
 让 M5Stack FIRE 类 ESP32 设备直接通过 Wi‑Fi 接入 FMO 中继，使用内置麦克风和扬声器通联。无需手机或电脑转发语音。
 
-**当前正式版本：v0.7.25；历史音频验收回退版本：v0.7.14。** 已在一台 ESP32、16 MB Flash、GPIO34 模拟麦克风 / GPIO25 DAC 扬声器的 FIRE 类设备上验证。其他 M5 型号请先核对硬件，不能直接等同兼容。
+**当前正式版本：v0.7.26；历史音频验收回退版本：v0.7.14。** 已在一台 ESP32、16 MB Flash、GPIO34 模拟麦克风 / GPIO25 DAC 扬声器的 FIRE 类设备上验证。其他 M5 型号请先核对硬件，不能直接等同兼容。
 
-[在线刷写](https://app.bh1jss.net/m5-flasher/) · [下载固件](https://github.com/54dashayu/m5-fmo-client/releases/latest) · [刷机与编译](docs/BUILD.md) · [配网和操作](docs/USER_GUIDE.md) · [证书说明](docs/CERTIFICATES.md) · [版本记录](CHANGELOG.md)
+[在线刷写](https://app.bh1jss.net/m5-flasher/) · [下载固件](https://github.com/54dashayu/m5-fmo-client/releases/latest) · [刷机与编译](docs/BUILD.md) · [配网和操作](docs/USER_GUIDE.md) · [证书说明](docs/CERTIFICATES.md) · [版本记录](CHANGELOG.md) · [正式版发布流程](docs/RELEASE.md)
+
+> **发布门禁：** 拟发布提交的 GitHub `host-tests` 和 `firmware` 必须全部通过，才能发布正式版并更新在线刷写页面。详见[发布流程](docs/RELEASE.md)。
 
 ## 实机展示
 
@@ -202,6 +204,10 @@ ESP-IDF **v5.5.1**，目标 `esp32`。仓库包含本地依赖；不要直接替
 
 升级保留身份和 Wi-Fi。新列表使用独立存储格式；回退旧固件仅能读取迁移前的旧列表。实际容量受 NVS/内存限制，并非无限。正式产物校验见 Release SHA256SUMS。
 
-## 当前正式版：0.7.25 接收缓冲优化
+## 历史版本：0.7.25 接收缓冲优化
 
 按实际包长存放接收语音，减少短 Opus 包挤满固定包位造成的溢出；按语音时长预缓存，空间紧张时提前播放。保持 8 kHz 和原有上行编码、双音尾音功能。完整离线回归通过；同功能开发构建已在 1791 点名中接收友台 Opus 和 AI RADPCM，观察期间没有队列溢出、解码或输出错误，用户确认声音明显连贯。长期负载仍需验证。
+
+## 当前正式版：0.7.26 M5 呼号前缀
+
+发送语音和双音尾音的包头呼号统一为 `M.呼号`（例如 `M.BH1JSS`）；证书、MQTT 登录和 UID 不变。用户已实测确认仪表盘显示 M. 且语音正常。保留 0.7.25 的接收缓冲优化。第三方服务器的 AI/点名解析应区分带前缀的显示身份与证书裸呼号；1791 已兼容。

@@ -2,6 +2,8 @@
 
 发布位置：https://app.bh1jss.net/m5-flasher/
 
+**部署前必须遵守[正式版发布流程](../docs/RELEASE.md)：拟发布提交的 GitHub `host-tests` 与 `firmware` 全部通过后，才能发布正式版；正式版附件校验完成后，才能更新本页面和默认刷写清单。检查未完成或失败时保持当前公开版本。**
+
 ```
 npm ci
 npm run build
