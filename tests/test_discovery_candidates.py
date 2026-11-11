@@ -30,5 +30,5 @@ rows[0].verified=now;j=discovery_json();v=cJSON_GetArrayItem(cJSON_GetObjectItem
 }
 '''
 with tempfile.TemporaryDirectory() as td:
- p=Path(td)/'t.c';p.write_text(pre+usable+funcs+tail);cj=Path(os.environ['IDF_PATH'])/'components/json/cJSON';subprocess.run(['cc','-Wall','-Wextra','-Werror','-I'+str(cj),str(p),str(cj/'cJSON.c'),'-o',td+'/t'],check=True);subprocess.run([td+'/t'],check=True)
+ p=Path(td)/'t.c';p.write_text(pre+usable+funcs+tail);cj=Path(os.environ['IDF_PATH'])/'components/json/cJSON';subprocess.run(['cc','-Wall','-Wextra','-Werror','-I'+str(cj),str(p),str(cj/'cJSON.c'),'-lm','-o',td+'/t'],check=True);subprocess.run([td+'/t'],check=True)
 print('PASS candidate list shows all states, verified-first ordering, original selection indexes, identity and expiry gates')

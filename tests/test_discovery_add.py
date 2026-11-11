@@ -21,5 +21,5 @@ tail=r'''
 int main(void){time_t now=time(NULL);updated=rows[0].seen=now;rows[0].relay=(relay_t){.uid=1845,.name="test",.call="BI4TES",.host="example.net",.port=1883};assert(!discovery_add(0,9));assert(adds==1);assert(rows[0].verified==0);assert(discovery_add(0,8));assert(discovery_add(-1,9));assert(discovery_add(1,9));busy=true;assert(discovery_add(0,9));busy=false;updated=now-600;assert(discovery_add(0,9));updated=now;rows[0].seen=now-1200;assert(discovery_add(0,9));assert(adds==1);rows[0].seen=now;save_error="full";assert(!strcmp(discovery_add(0,9),"full"));return 0;}
 '''
 with tempfile.TemporaryDirectory() as td:
- p=Path(td)/'t.c';p.write_text(pre+fn+tail);cj=Path(os.environ['IDF_PATH'])/'components/json/cJSON';subprocess.run(['cc','-Wall','-Wextra','-Werror','-I'+str(cj),str(p),str(cj/'cJSON.c'),'-o',td+'/t'],check=True);subprocess.run([td+'/t'],check=True)
+ p=Path(td)/'t.c';p.write_text(pre+fn+tail);cj=Path(os.environ['IDF_PATH'])/'components/json/cJSON';subprocess.run(['cc','-Wall','-Wextra','-Werror','-I'+str(cj),str(p),str(cj/'cJSON.c'),'-lm','-o',td+'/t'],check=True);subprocess.run([td+'/t'],check=True)
 print('PASS manual add: fresh unverified accepted without authentication upgrade, stale/revision/index/busy rejected, save failure preserved')

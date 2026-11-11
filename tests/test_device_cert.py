@@ -8,7 +8,7 @@ base=Path(__file__).resolve().parents[1]/'ui-preview-firmware'
 cjson=Path(os.environ['IDF_PATH'])/'components/json/cJSON'
 with tempfile.TemporaryDirectory() as td:
  libpath=Path(td)/'wire.dylib'
- subprocess.run(['cc','-shared','-fPIC','-O2','-o',str(libpath),'-I'+str(cjson),'-I'+str(base/'components/monocypher'),str(base/'main/cert_wire.c'),str(cjson/'cJSON.c'),str(base/'components/monocypher/monocypher.c'),str(base/'components/monocypher/monocypher-ed25519.c')],check=True)
+ subprocess.run(['cc','-shared','-fPIC','-O2','-o',str(libpath),'-I'+str(cjson),'-I'+str(base/'components/monocypher'),str(base/'main/cert_wire.c'),str(cjson/'cJSON.c'),str(base/'components/monocypher/monocypher.c'),str(base/'components/monocypher/monocypher-ed25519.c'),'-lm'],check=True)
  lib=C.CDLL(str(libpath));lib.cJSON_Parse.argtypes=[C.c_char_p];lib.cJSON_Parse.restype=C.c_void_p;lib.cJSON_Delete.argtypes=[C.c_void_p]
  lib.wire_validate_bundle.argtypes=[C.c_void_p,C.c_char_p,C.c_char_p,C.c_int64];lib.wire_validate_bundle.restype=C.c_char_p
  now=int(time.time());r,i,u,ik,dk=ephemeral_test_chain(now);good=dict(rootCert=r,intermediateCert=i,userCert=u);pk=unb64(u['subject']['publicKey'])
