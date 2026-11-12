@@ -37,7 +37,8 @@ static bool usable(candidate_t*c,time_t now){return c->verified>0&&now>=c->verif
 static bool parse(const cJSON*j,candidate_t*c,time_t now){
  const char*n=str(j,"name"),*call=str(j,"callsign"),*host=str(j,"host"),*fp=str(j,"fingerprint");
  const cJSON*u=cJSON_GetObjectItemCaseSensitive(j,"uid"),*p=cJSON_GetObjectItemCaseSensitive(j,"port"),*seen=cJSON_GetObjectItemCaseSensitive(j,"lastSeen");uint8_t key[32];
- if(!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(j,"rootTrusted"))||!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(j,"sourceVerified"))||!n||!*n||strlen(n)>64||!name_utf8_valid(n)||!wire_callsign(call)||!host||!*host||strlen(host)>63||!wire_unb64(fp,key,32)||!cJSON_IsNumber(u)||u->valuedouble<1||u->valuedouble>4294967295.0||floor(u->valuedouble)!=u->valuedouble||!cJSON_IsNumber(p)||p->valuedouble<1||p->valuedouble>65535||floor(p->valuedouble)!=p->valuedouble||!cJSON_IsNumber(seen)||seen->valuedouble>now||now-seen->valuedouble>=1200)return false;
+ bool confirmed=cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(j,"adminConfirmed"))&&cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(j,"mutualTrustConfirmed"));
+ if((!confirmed&&(!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(j,"rootTrusted"))||!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(j,"sourceVerified"))))||!n||!*n||strlen(n)>64||!name_utf8_valid(n)||!wire_callsign(call)||!host||!*host||strlen(host)>63||!wire_unb64(fp,key,32)||!cJSON_IsNumber(u)||u->valuedouble<1||u->valuedouble>4294967295.0||floor(u->valuedouble)!=u->valuedouble||!cJSON_IsNumber(p)||p->valuedouble<1||p->valuedouble>65535||floor(p->valuedouble)!=p->valuedouble||!cJSON_IsNumber(seen)||seen->valuedouble>now||now-seen->valuedouble>=1200)return false;
  for(const char*s=host;*s;s++)if(!((*s>='a'&&*s<='z')||(*s>='A'&&*s<='Z')||(*s>='0'&&*s<='9')||*s=='.'||*s=='-'))return false;
  for(const char*s=n;*s;s++)if((unsigned char)*s<32)return false;
  memset(c,0,sizeof(*c));snprintf(c->relay.name,65,"%s",n);snprintf(c->relay.call,8,"%s",call);snprintf(c->relay.host,64,"%s",host);snprintf(c->relay.fingerprint,44,"%s",fp);c->relay.uid=u->valuedouble;c->relay.port=p->valueint;c->seen=seen->valuedouble;return true;
@@ -57,7 +58,7 @@ static bool fetch_catalog(void){
  candidate_t*next=calloc(DISCOVERY_MAX,sizeof(candidate_t));if(!next)ok=false;int n=0;
  if(ok){const cJSON*v;cJSON_ArrayForEach(v,a){candidate_t c;if(parse(v,&c,now))next[n++]=c;}
  xSemaphoreTake(mutex,portMAX_DELAY);for(int i=0;i<n;i++)for(int k=0;k<count;k++)if(same(&next[i].relay,&rows[k].relay)){next[i].verified=rows[k].verified;next[i].attempted=rows[k].attempted;break;}
- memcpy(rows,next,n*sizeof(*next));count=n;updated=t->valuedouble;revision++;snprintf(message,sizeof(message),"广播验签节点 %d，空闲时验证接入",n);xSemaphoreGive(mutex);}
+ memcpy(rows,next,n*sizeof(*next));count=n;updated=t->valuedouble;revision++;snprintf(message,sizeof(message),"可信目录节点 %d，接入后确认权限",n);xSemaphoreGive(mutex);}
  if(ok){const cJSON*v;cJSON_ArrayForEach(v,a){candidate_t c;if(parse(v,&c,now))relays_update_name(v);}}
  free(next);cJSON_Delete(j);return ok;
 }
@@ -139,9 +140,8 @@ cJSON*discovery_json(void){
  cJSON_AddNumberToObject(j,"revision",revision);cJSON_AddStringToObject(j,"message",message);cJSON_AddNumberToObject(j,"candidates",count);
  for(int i=0;i<count;i++){indexes[i]=-1;if(owned&&fresh(&rows[i],now)){indexes[i]=verified++;cJSON_AddItemToArray(a,node_json(&rows[i].relay));}}
  // Fresh signed candidates are selectable before actual relay authentication.
- const char*order[]={"verified","checking","pending","unconfirmed","stale"};
- for(unsigned rank=0;rank<5;rank++)for(int i=0;i<count;i++){
-  const char*state=candidate_status(&rows[i],now,owned);if(strcmp(state,order[rank]))continue;
+ for(int i=0;i<count;i++){
+  const char*state=candidate_status(&rows[i],now,owned);
   cJSON*v=node_json(&rows[i].relay);cJSON_AddStringToObject(v,"state",state);cJSON_AddNumberToObject(v,"selectIndex",indexes[i]);cJSON_AddNumberToObject(v,"addIndex",strcmp(state,"stale")?i:-1);cJSON_AddItemToArray(all,v);
  }
  xSemaphoreGive(mutex);return j;

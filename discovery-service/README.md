@@ -19,3 +19,9 @@
 M5 校验目录签名与时间戳，空闲 10 秒后读取目录，最多每分钟对一个节点使用短 TCP 连接做一次 MQTT CONNECT（复用联网工作任务，不新增发现或 MQTT 任务），不发布、不订阅语音。当前服务器或同地址服务器不额外探测。只有本机证书成功认证的结果显示在设备/网页发现列表；结果绑定本机完整证书、端点与服务器指纹，广播/目录过期或身份更换即失效。连接失败不标注“未信任”，因为也可能是网络或服务器暂时不可用。客户端仍由对方 SAS 检查准入和吊销，目录服务目前不额外拉取 CRL。
 
 依赖：Python 3.10+、cryptography、cbor2（可放独立 vendor 目录，不修改语音服务环境）。systemd service/timer 见同目录；静态路由必须设置 no-store。停用时停止 timer，恢复旧 nginx include 即可；不涉及 SAS/EMQX 重启。
+
+## 0.7.31 信任优先目录
+
+`/var/lib/fmo-discovery/trust-policy.json` 包含 `preferredRootPublicKeys` 和 `confirmedServers`。每条确认记录必须提供 enabled=true、mutualTrustConfirmed=true、confirmedAt、expiresAt、evidence 以及完整 name/callsign/uid/host/port/fingerprint。管理员明确确认的固定端点优先且不依赖广播；仅在有效期内使用，不能仅凭导入根 CA、名称相似或加入收藏创建确认记录。签名目录保护此管理员声明；声明不伪装为根 CA 验签，也不替代本机 MQTT 准入。端点或指纹改变不会继承旧确认。
+
+其次优先已通过完整证书链验证且属于 preferredRootPublicKeys 的广播，再列出其他已通过根验证的广播。网页全量目录还保留普通广播供搜索。设备和网页都保持信任优先次序；本机实际认证结果独立显示。

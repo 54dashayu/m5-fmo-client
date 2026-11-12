@@ -78,6 +78,26 @@ def publish(path,data):
   os.chmod(tmp,0o644);os.replace(tmp,path)
  finally:
   if os.path.exists(tmp):os.unlink(tmp)
+def apply_trust(data,base):
+ from trust_priority import prioritize,identity
+ now=int(time.time());base=Path(base);policy_path=base/'trust-policy.json'
+ policy=json.loads(policy_path.read_text()) if policy_path.exists() else {}
+ trusted={}
+ try:
+  signed=json.loads((base/'trusted.json').read_text());payload=json.loads(signed['payload'])
+  if 0<=now-payload['updatedAt']<600:
+   trusted={identity(r):r for r in payload['servers'] if r.get('rootTrusted')}
+ except (OSError,ValueError,KeyError,TypeError):pass
+ for field in ['servers','allServers']:
+  enriched=[]
+  for raw in data[field]:
+   row=dict(raw);proof=trusted.get(identity(row))
+   if proof:
+    row.update(rootTrusted=True,rootPublicKey=proof.get('rootPublicKey',''))
+   enriched.append(row)
+  data[field]=prioritize(enriched,policy,now)
+ return data
+
 if __name__=='__main__':
  import sys
- data=fetch();publish(sys.argv[1],data);print('Published',len(data['servers']),'server entries')
+ data=apply_trust(fetch(),Path(sys.argv[1]).parent);publish(sys.argv[1],data);print('Published',len(data['servers']),'server entries')

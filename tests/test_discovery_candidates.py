@@ -21,8 +21,8 @@ static time_t updated;static bool owner_valid=true;static char message[96]="test
 '''
 tail='''int main(void){time_t now=time(NULL);updated=now;count=4;for(int i=0;i<4;i++){rows[i].relay.uid=i+1;strcpy(rows[i].relay.name,"node");strcpy(rows[i].relay.call,"BH1JSS");rows[i].seen=now;}rows[0].attempted=now;rows[1].verified=now;rows[2].verified=now;checking_uid=4;
 cJSON*j=discovery_json(),*a=cJSON_GetObjectItemCaseSensitive(j,"candidateServers");assert(cJSON_GetArraySize(a)==4);assert(cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(j,"servers"))==4);
-for(int i=0;i<2;i++){cJSON*v=cJSON_GetArrayItem(a,i);assert(cJSON_GetObjectItemCaseSensitive(v,"uid")->valueint==i+2);assert(cJSON_GetObjectItemCaseSensitive(v,"selectIndex")->valueint==i+1);assert(!strcmp(cJSON_GetObjectItemCaseSensitive(v,"state")->valuestring,"verified"));}
-assert(!strcmp(cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(a,2),"state")->valuestring,"checking"));assert(cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(a,3),"selectIndex")->valueint==0);cJSON_Delete(j);
+for(int i=0;i<4;i++){cJSON*v=cJSON_GetArrayItem(a,i);assert(cJSON_GetObjectItemCaseSensitive(v,"uid")->valueint==i+1);assert(cJSON_GetObjectItemCaseSensitive(v,"selectIndex")->valueint==i);}
+assert(!strcmp(cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(a,0),"state")->valuestring,"unconfirmed"));assert(!strcmp(cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(a,1),"state")->valuestring,"verified"));cJSON_Delete(j);
 owner_valid=false;j=discovery_json();assert(cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(j,"servers"))==0);cJSON_Delete(j);owner_valid=true;updated=now-601;j=discovery_json();a=cJSON_GetObjectItemCaseSensitive(j,"candidateServers");for(int i=0;i<4;i++){assert(!strcmp(cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(a,i),"state")->valuestring,"stale"));assert(cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(a,i),"selectIndex")->valueint==-1);}cJSON_Delete(j);
 count=0;j=discovery_json();assert(cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(j,"candidateServers"))==0);cJSON_Delete(j);
 count=1;updated=now;rows[0].relay.uid=1845;rows[0].seen=now;rows[0].verified=rows[0].attempted=0;j=discovery_json();a=cJSON_GetObjectItemCaseSensitive(j,"candidateServers");assert(cJSON_GetArraySize(a)==1);cJSON*v=cJSON_GetArrayItem(a,0);assert(!cJSON_GetObjectItemCaseSensitive(v,"adminConfirmed"));assert(!strcmp(cJSON_GetObjectItemCaseSensitive(v,"state")->valuestring,"pending"));assert(cJSON_GetObjectItemCaseSensitive(v,"selectIndex")->valueint==0);cJSON_Delete(j);
@@ -31,4 +31,4 @@ rows[0].verified=now;j=discovery_json();v=cJSON_GetArrayItem(cJSON_GetObjectItem
 '''
 with tempfile.TemporaryDirectory() as td:
  p=Path(td)/'t.c';p.write_text(pre+usable+funcs+tail);cj=Path(os.environ['IDF_PATH'])/'components/json/cJSON';subprocess.run(['cc','-Wall','-Wextra','-Werror','-I'+str(cj),str(p),str(cj/'cJSON.c'),'-lm','-o',td+'/t'],check=True);subprocess.run([td+'/t'],check=True)
-print('PASS candidate list shows all states, verified-first ordering, original selection indexes, identity and expiry gates')
+print('PASS candidate list shows all states, trusted catalog ordering, original selection indexes, identity and expiry gates')

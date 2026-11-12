@@ -8,6 +8,7 @@ import cbor2
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey,Ed25519PrivateKey
 from catalog import publish,stamp
+from trust_priority import prioritize
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tools'))
 from fmo_identity import tbs,unb64,b64
 
@@ -85,7 +86,7 @@ def main():
   try:
    row=station(x['raw'],x['at'],issuers,now);servers[(row['uid'],row['host'],row['port'],row['fingerprint'])]=row
   except Exception:unknown+=1
- result=dict(format='m5-trusted-discovery-v1',updatedAt=now,sourceConnected=True,servers=sorted(servers.values(),key=lambda r:-r['lastSeen'])[:6])
- for row in result['servers']:row.pop('rootPublicKey',None)
+ policy_path=base/'trust-policy.json';policy=json.loads(policy_path.read_text()) if policy_path.exists() else {}
+ result=dict(format='m5-trusted-discovery-v1',updatedAt=now,sourceConnected=True,servers=prioritize(servers.values(),policy,now)[:6])
  payload=json.dumps(result,ensure_ascii=False,separators=(',',':'));key=Ed25519PrivateKey.from_private_bytes((base/'catalog-signing.key').read_bytes());publish(base/'trusted.json',dict(payload=payload,signature=b64(key.sign(payload.encode()))));print('CA verified stations:',len(result['servers']),'unresolved:',unknown,'issuer identities:',len(issuers))
 if __name__=='__main__':main()
