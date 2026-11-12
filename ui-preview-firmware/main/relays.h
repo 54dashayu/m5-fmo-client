@@ -10,6 +10,7 @@ int relays_count(void);
 int relays_current(relay_t*out,uint32_t*revision);
 bool relays_get(int index,relay_t*out);
 bool relays_select(int index);
+bool relays_select_default(void);
 cJSON*relays_json(void);
 const char*relays_add(const cJSON*j);
 

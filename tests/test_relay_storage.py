@@ -73,6 +73,12 @@ int main(void){
  relays_configure(1,"BH1JSS",ha);restart();assert(relays_verified(&r));
  // A failed proof write must never create durable evidence after reboot.
  relays_configure(2,"BI4TES",hb);restart();assert(relays_get(0,&r));fail_at=writes+1;relays_connection(&r,true);fail_at=-1;restart();assert(!relays_verified(&r));
+ // Profile defaults are explicit, preserve manual choice on reboot, and do not grant evidence.
+ relays_configure(2,"BI4TES",hb);restart();assert(relays_select_default());assert(relays_current(&r,NULL)>=0&&r.uid==1845&&!strcmp(r.call,"BI4TES"));assert(!relays_verified(&r));
+ int with_default=count;assert(relays_select_default());assert(count==with_default);
+ assert(relays_select(0));restart();assert(selected==0);assert(relays_select_default());assert(relays_current(&r,NULL)>=0&&r.uid==1845);
+ relays_configure(1,"BH1JSS",ha);restart();int before=count;fail_at=writes+1;assert(!relays_select_default());fail_at=-1;assert(count==before);assert(relays_select_default());assert(relays_current(&r,NULL)>=0&&r.uid==1791&&!relays_verified(&r));
+ relays_configure(3,"custom",ha);restart();int previous=selected;assert(relays_select_default());assert(selected==previous);
  profile_id=0;strcpy(index_key,"index");memset(identity_hash,0,32);
  // Interrupted migration leaves legacy authoritative; retry succeeds.
  for(int k=0;k<256;k++){free(cells[k].data);memset(&cells[k],0,sizeof(cells[k]));}

@@ -51,6 +51,20 @@ static const char*append_record(const relay_t*r){
  if(!store_record(id,r))return "保存失败，设备存储空间可能不足";
  entries[count++]=(entry_t){.id=id};if(!save_index()){count--;save_index();return "保存失败，原列表已保留";}return NULL;
 }
+// Explicit profile switches choose these public connection records, never grant trust.
+static const relay_t*profile_default(void){
+ static const relay_t bh={.name="机婶婶的测试台",.call="BH1JSS",.host="120.27.244.89",.fingerprint="U2IJZO1ouwf9i5gdU8WC9TU4_hOGAfZo0FxeJyy8JzI",.uid=1791,.port=28883};
+ static const relay_t bi={.name="AI PASSPORT互通",.call="BI4TES",.host="115.29.167.110",.fingerprint="yMjgJ28IZngKI5DiwqPFp3S5M7OdY_CjiWD5lQr3vgc",.uid=1845,.port=1883};
+ return profile_id==2?&bi:profile_id==1?&bh:NULL;
+}
+bool relays_select_default(void){
+ const relay_t*target=profile_default();if(!target)return true;
+ xSemaphoreTake(lock,portMAX_DELAY);int found=-1;
+ for(int i=0;i<count;i++){relay_t r;if(load_record(entries[i].id,&r)&&r.uid==target->uid&&!strcmp(r.call,target->call)){found=i;break;}}
+ // Preserve updated saved endpoint/name/fingerprint; only seed when absent.
+ if(found<0&&!append_record(target))found=count-1;
+ xSemaphoreGive(lock);return found>=0&&relays_select(found);
+}
 static int ordered_at(int position){int pos=0;for(int rank=0;rank<2;rank++)for(int i=0;i<count;i++)if((entries[i].verified?0:1)==rank){if(pos++==position)return i;}return -1;}
 int relays_order_at(int position){xSemaphoreTake(lock,portMAX_DELAY);int i=ordered_at(position);xSemaphoreGive(lock);return i;}
 int relays_order_position(int index){xSemaphoreTake(lock,portMAX_DELAY);int pos=count;if(index>=0&&index<count){pos=0;for(int i=0;i<count;i++)if((entries[i].verified&&!entries[index].verified)||(entries[i].verified==entries[index].verified&&i<index))pos++;}xSemaphoreGive(lock);return pos;}

@@ -140,7 +140,7 @@ static void refresh(void){
  if(a.rx&&!a.tx)snprintf(held_call,sizeof(held_call),"%s",a.caller[0]?a.caller:"--");
  relay_t relay;int current=relays_current(&relay,NULL);
  static int shown=-1;if(shown!=page){for(int i=0;i<5;i++){lv_label_set_text(lines[i],"");lv_obj_set_pos(lines[i],12,70+i*27);lv_obj_set_style_text_color(lines[i],lv_color_hex(0xecf2f8),0);lv_obj_set_style_text_font(lines[i],(page==RELAYS||page==DISCOVER||page==CA_LIST||page==CA_CONFIRM||page==IDENTITY)?&relay_font:&status_font,0);lv_label_set_long_mode(lines[i],LV_LABEL_LONG_DOT);}shown=page;bool is_home=page==HOME;if(is_home)lv_obj_clear_flag(home,LV_OBJ_FLAG_HIDDEN);else lv_obj_add_flag(home,LV_OBJ_FLAG_HIDDEN);lv_obj_t*old[]={brand,title,footer,lines[0],lines[1],lines[2],lines[3],lines[4]};for(unsigned i=0;i<8;i++){if(is_home)lv_obj_add_flag(old[i],LV_OBJ_FLAG_HIDDEN);else lv_obj_clear_flag(old[i],LV_OBJ_FLAG_HIDDEN);}}
- lv_label_set_text_fmt(brand,(page==RELAYS||page==DISCOVER)?"体系：%s":"FMO / M5 FIRE · %s",(page==RELAYS||page==DISCOVER)?relays_profile_name():"0.7.28");
+ lv_label_set_text_fmt(brand,(page==RELAYS||page==DISCOVER)?"体系：%s":"FMO / M5 FIRE · %s",(page==RELAYS||page==DISCOVER)?relays_profile_name():"0.7.29");
  lv_obj_set_pos(footer,12,220);lv_obj_set_style_text_font(footer,&status_font,0);lv_obj_set_style_text_color(footer,lv_color_hex(0x70d5ae),0);lv_label_set_text(footer,"长按 A 返回       B 确认");
  if(page==HOME){
   refresh_home(&v,&a,&relay);
@@ -173,7 +173,7 @@ void app_main(void){
  side_leds_init();battery_init();
  lv_init();verify_fonts();lv_port_disp_set_rotation(0);lv_port_disp_init();
  lv_obj_set_style_bg_color(lv_scr_act(),lv_color_hex(0x0d151d),0);lv_obj_clear_flag(lv_scr_act(),LV_OBJ_FLAG_SCROLLABLE);
- brand=label("FMO / M5 FIRE  ·  0.7.28",12,8,&status_font,0x9baab8);
+ brand=label("FMO / M5 FIRE  ·  0.7.29",12,8,&status_font,0x9baab8);
  title=label("正在启动网页后台",12,32,&font20,0xf6ad74);
  for(int i=0;i<5;i++)lines[i]=label("",12,70+i*27,&status_font,0xecf2f8);
  footer=label("正在启动",12,220,&status_font,0x70d5ae);
