@@ -11,6 +11,7 @@ static esp_err_t enroll_save(int id,const char*request){
 }
 static esp_err_t enroll_cancel(int id){esp_err_t e=nvs_erase_key(nv,enroll_keys[id]);if(e==ESP_ERR_NVS_NOT_FOUND)e=ESP_OK;if(e==ESP_OK)e=nvs_commit(nv);if(e==ESP_OK)snprintf(enroll_states[id],120,"本体系自动领取已停止");return e;}
 static void enroll_status(cJSON*j){
+ cJSON_AddNumberToObject(j,"selectedProfileId",selected_ca);cJSON_AddStringToObject(j,"selectedProfileName",selected_ca_name);
  cJSON*states=cJSON_AddObjectToObject(j,"enrollments");
  for(int i=0;i<2;i++){size_t n=0;const char*text=enroll_states[i];if(!*text){if(nvs_get_blob(nv,enroll_keys[i],NULL,&n)==ESP_OK)text="待处理申请已恢复，联网后自动领取";else if(nvs_get_str(nv,i?"cert_bi":"cert_bh",NULL,&n)==ESP_OK)text="设备证书已就绪，可在体系列表选择使用";else text="尚未开启本体系自动领取";}cJSON_AddStringToObject(states,i?"bi4tes":"bh1jss",text);}
 }

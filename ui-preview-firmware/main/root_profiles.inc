@@ -15,15 +15,15 @@ static int root_slot(cJSON*r,bool create,const char**error){
 }
 static void root_profile_row(cJSON*rows,int id,const char*name,const char*key,const char*active,bool connected){
  char bank[24];if(id<=2)snprintf(bank,sizeof(bank),"%s",id==1?"cert_bh":"cert_bi");else snprintf(bank,sizeof(bank),"cert_p%d",id-3);
- size_t n=0;bool current=active&&key&&!strcmp(active,key),has=nvs_get_str(nv,bank,NULL,&n)==ESP_OK;
- cJSON*j=cJSON_CreateObject();cJSON_AddNumberToObject(j,"id",id);cJSON_AddStringToObject(j,"name",name?name:"未命名根 CA");cJSON_AddStringToObject(j,"publicKey",key?key:"");cJSON_AddBoolToObject(j,"current",current);cJSON_AddBoolToObject(j,"connected",current&&connected);cJSON_AddBoolToObject(j,"hasCertificate",has||current);cJSON_AddBoolToObject(j,"canSwitch",has&&!current);cJSON_AddBoolToObject(j,"builtin",id<=2);cJSON_AddItemToArray(rows,j);
+ size_t n=0;bool activated=active&&key&&!strcmp(active,key),current=activated||(!active&&selected_ca==id),has=nvs_get_str(nv,bank,NULL,&n)==ESP_OK;
+ cJSON*j=cJSON_CreateObject();cJSON_AddNumberToObject(j,"id",id);cJSON_AddStringToObject(j,"name",name?name:"未命名根 CA");cJSON_AddStringToObject(j,"publicKey",key?key:"");cJSON_AddBoolToObject(j,"current",current);cJSON_AddBoolToObject(j,"connected",activated&&connected);cJSON_AddBoolToObject(j,"hasCertificate",has||activated);cJSON_AddBoolToObject(j,"canSwitch",!current||(has&&!activated));cJSON_AddBoolToObject(j,"active",activated);cJSON_AddBoolToObject(j,"builtin",id<=2);cJSON_AddItemToArray(rows,j);
 }
 static esp_err_t roots_page(request_t*r){
  if(!auth(r)){return ESP_OK;}if(voice_busy())return fail(r,"通联中暂停证书列表操作，请空闲后重试");
  cJSON*q=body(r);const char*action=js(q,"action");
  if(action&&!strcmp(action,"import")){
   cJSON*root=cJSON_GetObjectItemCaseSensitive(q,"root");const char*error=!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(q,"trustRoot"))?"请确认信任此根 CA":wire_validate_root(root,time(NULL));
-  int id=error?0:root_slot(root,true,&error);cJSON_Delete(q);return id?success(r,"根 CA 已保存；尚未安装设备证书时不能切换登录"):fail(r,error?error:"保存失败");
+  int id=error?0:root_slot(root,true,&error);cJSON_Delete(q);return id?success(r,"根 CA 已保存；可选择体系后申请设备证书"):fail(r,error?error:"保存失败");
  }
  cJSON_Delete(q);cJSON*active=bundle?cJSON_Parse(bundle):NULL;const char*active_key=root_key(cJSON_GetObjectItemCaseSensitive(active,"rootCert"));device_view_t v;device_web_view(&v);
  cJSON*out=cJSON_CreateObject(),*rows=cJSON_AddArrayToObject(out,"profiles");root_profile_row(rows,1,"BH1JSS M5 Root CA",root_keys[0],active_key,v.mqtt_online);root_profile_row(rows,2,"FMO Passport Root CA · BI4TES",root_keys[1],active_key,v.mqtt_online);

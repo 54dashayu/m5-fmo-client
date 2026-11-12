@@ -10,6 +10,6 @@ bool device_select_relay(int index);
 void device_management_ap(bool enabled);
 
 #define DEVICE_PROFILE_MAX 10
-typedef struct {int id;char name[97];bool current,has_certificate;} device_profile_t;
+typedef struct {int id;char name[97];bool current,has_certificate,active;} device_profile_t;
 int device_profiles(device_profile_t out[DEVICE_PROFILE_MAX]);
 bool device_profile_switch(int id);

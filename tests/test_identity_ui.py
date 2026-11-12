@@ -11,8 +11,8 @@ pre=r'''
 #include <stdarg.h>
 #include <stdbool.h>
 #include <assert.h>
-enum{IDENTITY,CA_LIST,CA_CONFIRM};
-typedef struct{int id;char name[97];bool current,has_certificate;}device_profile_t;
+enum{IDENTITY,CA_LIST,CA_CONFIRM,WEB};
+typedef struct{int id;char name[97];bool current,has_certificate,active;}device_profile_t;
 static device_profile_t ca_profiles[10],ca_target;static int ca_count,page,selection,keys,loads,requests,last_id;static bool ca_submitted;static char ca_notice[96];
 static void go(int next){page=next;selection=0;ca_submitted=false;}
 static void load_ca_profiles(void){loads++;}
@@ -25,9 +25,9 @@ static void lv_label_set_text(char*p,const char*s){snprintf(p,256,"%s",s);}
 static void lv_label_set_text_fmt(char*p,const char*fmt,...){va_list a;va_start(a,fmt);vsnprintf(p,256,fmt,a);va_end(a);}
 '''
 tail=r'''
-int main(void){for(int i=0;i<6;i++){ca_profiles[i].id=i+1;snprintf(ca_profiles[i].name,97,"CA%d",i+1);ca_profiles[i].has_certificate=true;}ca_profiles[0].current=true;ca_profiles[2].has_certificate=false;ca_count=6;
-page=IDENTITY;key(1);assert(page==CA_LIST);key(1);assert(!requests&&page==CA_LIST);key(2);key(2);key(1);assert(!requests&&page==CA_LIST&&strstr(ca_notice,"仅有根"));key(0);key(1);assert(page==CA_CONFIRM&&ca_target.id==2);key(0);assert(page==CA_LIST&&!requests);selection=1;key(1);key(1);assert(requests==1&&last_id==2&&ca_submitted);key(1);key(0);assert(requests==1&&page==CA_CONFIRM);
-go(CA_LIST);selection=4;render();assert(strstr(title,"2/2")&&strstr(lines[0],"> CA5")&&!lines[2][0]);selection=5;key(2);assert(selection==0);key(0);assert(selection==5);ca_count=0;key(1);assert(loads==1);puts("PASS identity UI entry, root-only guard, confirmation/cancel, single submit and pagination");}
+int main(void){for(int i=0;i<6;i++){ca_profiles[i].id=i+1;snprintf(ca_profiles[i].name,97,"CA%d",i+1);ca_profiles[i].has_certificate=true;}ca_profiles[0].current=true;ca_profiles[0].active=true;ca_profiles[2].has_certificate=false;ca_count=6;
+page=IDENTITY;key(1);assert(page==CA_LIST);key(1);assert(!requests&&page==CA_LIST);key(2);key(2);key(1);assert(!requests&&page==CA_CONFIRM&&ca_target.id==3);key(0);selection=1;key(1);assert(page==CA_CONFIRM&&ca_target.id==2);key(0);assert(page==CA_LIST&&!requests);selection=1;key(1);key(1);assert(requests==1&&last_id==2&&ca_submitted);key(1);key(0);assert(requests==1&&page==CA_CONFIRM);
+go(CA_LIST);selection=4;render();assert(strstr(title,"2/2")&&strstr(lines[0],"> CA5")&&!lines[2][0]);selection=5;key(2);assert(selection==0);key(0);assert(selection==5);ca_count=0;key(1);assert(loads==1);puts("PASS identity UI entry, root-only confirmation, confirmation/cancel, single submit and pagination");}
 '''
 with tempfile.TemporaryDirectory() as td:
  p=Path(td);(p/'t.c').write_text(pre+'static void key(int k){'+key+'}\nstatic void render(void){'+render+'}\n'+tail)
