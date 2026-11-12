@@ -32,8 +32,15 @@ static esp_err_t roots_page(request_t*r){
 }
 
 #include "preset_qfm_root.inc"
+#include "preset_bg5esn_root.inc"
+#include "preset_rflink_root.inc"
 static esp_err_t roots_seed_defaults(void){
- cJSON*r=cJSON_Parse(preset_qfm_root);if(!r)return ESP_ERR_NO_MEM;
- const char*error=NULL;int id=root_slot(r,false,&error);if(!id)id=root_slot(r,true,&error);
- cJSON_Delete(r);return id?ESP_OK:ESP_FAIL;
+ const char*presets[]={preset_qfm_root,preset_bg5esn_root,preset_rflink_root};
+ esp_err_t result=ESP_OK;
+ for(size_t i=0;i<sizeof(presets)/sizeof(presets[0]);i++){
+  cJSON*r=cJSON_Parse(presets[i]);if(!r){result=ESP_ERR_NO_MEM;continue;}
+  const char*error=NULL;int id=root_slot(r,false,&error);if(!id)id=root_slot(r,true,&error);
+  cJSON_Delete(r);if(!id)result=ESP_FAIL;
+ }
+ return result;
 }
