@@ -346,7 +346,8 @@ static int board_usb_read(void *buf,size_t n){
 static int board_usb_write(const void *buf,size_t n){
 #ifdef CONFIG_FMO_BOARD_XINGZHI
  size_t sent=0;int64_t deadline=esp_timer_get_time()+500000;
- while(sent<n&&esp_timer_get_time()<deadline){int count=usb_serial_jtag_write_bytes((const char*)buf+sent,n-sent,pdMS_TO_TICKS(50));if(count>0)sent+=count;else vTaskDelay(1);}
+ // The USB driver queues each write atomically: a whole status reply exceeds its ring buffer.
+ while(sent<n&&esp_timer_get_time()<deadline){size_t chunk=n-sent;if(chunk>128)chunk=128;int count=usb_serial_jtag_write_bytes((const char*)buf+sent,chunk,pdMS_TO_TICKS(50));if(count>0)sent+=count;else vTaskDelay(1);}
  return (int)sent;
 #else
  return uart_write_bytes(UART_NUM_0,buf,n);
