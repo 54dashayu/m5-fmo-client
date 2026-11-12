@@ -1,14 +1,35 @@
-# M5 FMO Client · M5 独立通联终端
+# FMO Client · M5 与小智独立通联终端
 
-让 M5Stack FIRE 类 ESP32 设备直接通过 Wi‑Fi 接入 FMO 中继，使用内置麦克风和扬声器通联。无需手机或电脑转发语音。
+让 M5 FIRE 类和 Xingzhi Cube 小智硬件通过 Wi-Fi 独立接入 FMO 中继，使用内置麦克风与扬声器通联。共用源码、分别构建两种板型固件，不能交叉刷写。
 
-**当前正式版本：v0.7.29；历史音频验收回退版本：v0.7.14。** 已在一台 ESP32、16 MB Flash、GPIO34 模拟麦克风 / GPIO25 DAC 扬声器的 FIRE 类设备上验证。其他 M5 型号请先核对硬件，不能直接等同兼容。
+**当前版本：v0.7.30。** 增加直接选择发现节点、红发绿收呼吸提示、90° 屏幕旋转、两种 PTT 模式及小智电量显示；根 CA 选择中移除 BG5ESN，保留高级手动添加中继。
+
+| 在线刷写硬件选择 | 芯片与外设 | 固件包 |
+| --- | --- | --- |
+| M5 FIRE 类 | ESP32，320×240，GPIO34 模拟麦克风 / GPIO25 DAC，灯条 | `fmo-m5-fire-v0.7.30.zip` |
+| 小智 Xingzhi Cube 1.54 TFT WiFi | ESP32-S3 R8N16，240×240，I2S 麦克风/扬声器，三键 | `fmo-xingzhi-cube-1.54tft-wifi-v0.7.30.zip` |
+
+仅限以上确切板型；M5 Core2/CoreS3 和其他小智设备不能直接等同兼容。已有 FMO 用户选择保留配置升级；原厂小智首次安装前先做整机备份。
 
 [在线刷写](https://app.bh1jss.net/m5-flasher/) · [下载固件](https://github.com/54dashayu/m5-fmo-client/releases/latest) · [刷机与编译](docs/BUILD.md) · [配网和操作](docs/USER_GUIDE.md) · [证书说明](docs/CERTIFICATES.md) · [版本记录](CHANGELOG.md) · [正式版发布流程](docs/RELEASE.md)
 
 > **发布门禁：** 拟发布提交的 GitHub `host-tests` 和 `firmware` 必须全部通过，才能发布正式版并更新在线刷写页面。详见[发布流程](docs/RELEASE.md)。
 
-## 实机展示
+## 小智与 M5 实机
+
+![M5 与小智双机通联](docs/images/m5-xiaozhi-pair.jpg)
+
+<details><summary>小智实机外观（界面随版本更新）</summary>
+
+![Xingzhi Cube 1.54 TFT 小智](docs/images/xiaozhi-device.jpg)
+
+![小智手持展示](docs/images/xiaozhi-handheld.jpg)
+
+</details>
+
+版本详情及首次安装注意事项见 [0.7.30 发布说明](docs/RELEASE_0.7.30.md)。
+
+## M5 实机展示
 
 右侧绿色底座设备为本项目 M5 FMO 终端，旁边为 Passport。照片由 BH1JSS 提供。
 

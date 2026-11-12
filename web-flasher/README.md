@@ -1,30 +1,13 @@
-# 在线 USB 刷写页面
+# FMO 多硬件在线刷写
 
-发布位置：https://app.bh1jss.net/m5-flasher/
+入口保持 https://app.bh1jss.net/m5-flasher/ 。项目介绍与刷写页面支持 M5 FIRE 类、Xingzhi Cube 1.54 TFT 小智的明确选择，并提供实机照片。
 
-**部署前必须遵守[正式版发布流程](../docs/RELEASE.md)：拟发布提交的 GitHub `host-tests` 与 `firmware` 全部通过后，才能发布正式版；正式版附件校验完成后，才能更新本页面和默认刷写清单。检查未完成或失败时保持当前公开版本。**
+构建前端：`npm ci && npm run build`。固件：`python tools/build_board.py m5` 和 `python tools/build_board.py xingzhi`；提交源码后 `python tools/package_multiboard_release.py` 生成两套版本目录、独立 manifest、ZIP 与校验和，不连接设备、不部署。`--preview` 仅供本地预览，不代表发布已通过门禁。
 
-```
-npm ci
-npm run build
-```
+两套清单分别在 firmware/m5-fire/manifest.json 和 firmware/xingzhi-cube-1.54tft-wifi/manifest.json。所有文件在对应 v版本 目录；旧目录保留可回退。生产发布遵守 docs/RELEASE.md 的确切提交及标签双门禁，之后才更新默认清单和页面。
 
-在仓库根运行 `python3 tools/package_release.py` 生成固件、ZIP、校验和及 `public/firmware/manifest.json`，将 `public/` 部署到 HTTPS 静态目录。
+桌面 Chrome/Edge Web Serial。准备阶段检查下载SHA256、芯片及现有分区；最终确认后才写入，取消不写，升级只写应用。首次安装另需确认。S3 原厂迁移采用全FF initial-settings.bin 初始化新NVS/PHY范围；此文件不含任何设备数据，仅首次安装写入，升级不写。禁止 eraseAll。
 
-支持桌面 Chrome / Edge Web Serial。所有运行时依赖在本站打包，不依赖外部 CDN。下载先验 SHA256，写入后 esptool-js 校验 MD5。升级先读取分区表并检查 NVS / factory 地址与大小，只写 0x10000 应用。首次安装写三个分段，不写 NVS；均禁止 eraseAll。
+esptool-js 0.7.1 重启策略缺少 RTS 置位，网页补充 DTR释放与RTS脉冲；S3使用200ms，原ESP32使用120ms。支持芯片检查不能自动识别同芯片的不同接线，必须由用户核对板型。
 
-不自动读取或上传证书、私钥、Wi-Fi 配置。串口选择必须由用户点击。首装改变分区，其他固件数据不保证兼容；原版 ESP32 芯片检测不代替用户核对 M5 FIRE 硬件。
-
-已验证构建和浏览器流程。浏览器真实 USB 写入与首次安装仍需实机验收；已有设备应用区升级已用 esptool CLI 验证。
-
-刷写分两步：选择串口、校验下载和设备分区后显示确认区；仅“确认开始刷写”调用 writeFlash，取消则退出并尝试重启原系统，不写 Flash。
-
-### 网页版本 20261109.1
-
-页面打开时自动查询服务器固件清单，显示可刷版本、查询时间与应用哈希摘要；可手动刷新。查询失败时禁止开始刷写，连接前会重新查询，确认后使用已校验的同一份固件。新增复制日志和逐文件进度显示；写入校验成功但自动重启失败会单独提示。设备已安装版本仍以 M5 屏幕为准。
-
-验证：浏览器模拟串口覆盖确认前不写入、取消不写入、升级只写应用、不兼容分区阻止、版本查询失败及恢复。模拟测试不代表真实 USB 刷写验收；实际写入失败仍需现场日志定位。
-
-### 网页版本 20261109.2
-
-修复原版 ESP32 USB-UART 刷写后缺少复位脉冲：释放 DTR（GPIO0），RTS 置位 120 ms 后释放（EN），随后关闭串口。成功和取消准备均使用相同复位流程。依赖 esptool-js 0.7.1 的 HardReset 仅释放 RTS，可能停留在刷写 stub 中。当前实机通过相同串口信号顺序恢复，日志确认 0.7.14 启动及 Wi-Fi 就绪；修订网页的完整 USB 刷写仍待用户验证。
+测试覆盖两种板型的升级、首次安装、准备不写、取消不写、芯片错误及分区不兼容拒绝、硬件切换清除确认、复位脉冲。模拟测试不代表真实浏览器USB刷写验收。照片由用户授权发布。

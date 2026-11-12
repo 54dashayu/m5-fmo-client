@@ -4,7 +4,7 @@
 
 ## 必须遵守的发布门禁
 
-**拟发布的确切提交必须在 GitHub Actions 的 `Build and test` 工作流中完成检查，且 `host-tests`（主机测试）和 `firmware`（ESP32 固件构建）全部为 `success`，才能发布正式版并更新在线刷写页面。**
+**拟发布的确切提交必须在 GitHub Actions 的 `Build and test` 工作流中完成检查，且 `host-tests`（主机测试）和 `firmware`（ESP32 与 ESP32-S3 两种固件构建）全部为 `success`，才能发布正式版并更新在线刷写页面。**
 
 - 本地测试、编译或真机验证通过，不能代替 GitHub 检查通过。
 - 排队、运行中、失败、取消、跳过或缺失任一任务，均视为门禁未通过。

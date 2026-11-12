@@ -10,18 +10,26 @@ jobs:
     container: espressif/idf:v5.5.1
     steps:
       - uses: actions/checkout@v4
-      - name: Build ESP32 firmware
+      - name: Build M5 ESP32 firmware
         shell: bash
         run: |
           . "$IDF_PATH/export.sh"
-          idf.py -C ui-preview-firmware build
+          python tools/build_board.py m5
+      - name: Build Xingzhi ESP32-S3 firmware
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          python tools/build_board.py xingzhi
       - uses: actions/upload-artifact@v4
         with:
-          name: m5-fmo-firmware
+          name: fmo-multiboard-firmware
           path: |
-            ui-preview-firmware/build/m5-fmo-ui-preview.bin
-            ui-preview-firmware/build/bootloader/bootloader.bin
-            ui-preview-firmware/build/partition_table/partition-table.bin
+            build-m5-regression/m5-fmo-ui-preview.bin
+            build-m5-regression/bootloader/bootloader.bin
+            build-m5-regression/partition_table/partition-table.bin
+            build-xingzhi/m5-fmo-ui-preview.bin
+            build-xingzhi/bootloader/bootloader.bin
+            build-xingzhi/partition_table/partition-table.bin
   host-tests:
     runs-on: ubuntu-latest
     steps:
@@ -43,3 +51,5 @@ jobs:
       - run: python tools/run_tests.py
         env:
           IDF_PATH: ${{ github.workspace }}/.idf-test
+      - name: Build browser flasher
+        run: npm --prefix web-flasher ci && npm --prefix web-flasher run build
