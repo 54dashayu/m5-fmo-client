@@ -1,11 +1,11 @@
 // 240x240 layout; keep readable fonts instead of scaling the M5 canvas.
-static void build_home(void){
+static void build_compact_home(void){
  home=box(lv_scr_act(),0,0,240,240,0x0b151c,0);
- home_label("FMO/S3",8,5,65,&status_font,0xd4e4eb);
- local_call=home_label("--",78,5,108,&status_font,0x7ec9ff);lv_label_set_long_mode(local_call,LV_LABEL_LONG_SCROLL_CIRCULAR);
- net=home_label("Wi-Fi",190,5,44,&ui_small,0xb4c7d2);
- battery_label=home_label("--",0,0,1,&ui_small,0xb4c7d2);battery_fill=box(home,0,0,1,1,0,0);
- lv_obj_add_flag(battery_label,LV_OBJ_FLAG_HIDDEN);lv_obj_add_flag(battery_fill,LV_OBJ_FLAG_HIDDEN);
+ home_label(FMO_BOARD_TITLE,8,5,65,&status_font,0xd4e4eb);
+ local_call=home_label("--",70,5,90,&status_font,0x7ec9ff);lv_label_set_long_mode(local_call,LV_LABEL_LONG_SCROLL_CIRCULAR);
+ net=home_label("Wi-Fi",164,5,32,&ui_small,0xb4c7d2);
+ battery_label=home_label("--",198,5,42,&ui_small,0xb4c7d2);battery_fill=box(home,210,21,18,3,0x58d6b2,1);
+ lv_obj_add_flag(battery_fill,LV_OBJ_FLAG_HIDDEN);
  box(home,6,27,228,91,0x14232d,10);
  caption=home_label("我的呼号",12,32,158,&ui_small,0xb4c7d2);
  badge=home_label("未接入",176,32,52,&ui_small,0xa8b5bf);

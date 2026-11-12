@@ -3,9 +3,10 @@
 #define CUSTOM_ROOT_SLOTS 8
 static const char*root_keys[]={"5y6IrwX4_Ju5vgdgKHOVrxeseLqlpjIorugzCvcpE0c","QJGn93YtVCiU6klgM_fynYJ5s228OoILw77HSTLTeyc"};
 static const char*root_key(const cJSON*r){return js(cJSON_GetObjectItemCaseSensitive(r,"subject"),"publicKey");}
+static bool root_selectable(const char*k){return k&&strcmp(k,"DCeeVS320f36ToVP2eOADVN-Q0LzpMYmiVkmNYzuysY");}
 static cJSON*stored_json(const char*key,size_t cap){size_t n=0;if(nvs_get_str(nv,key,NULL,&n)!=ESP_OK||n<2||n>cap)return NULL;char*s=malloc(n);if(!s)return NULL;cJSON*j=nvs_get_str(nv,key,s,&n)==ESP_OK?cJSON_Parse(s):NULL;free(s);return j;}
 static int root_slot(cJSON*r,bool create,const char**error){
- const char*k=root_key(r);if(!k){*error="根公钥缺失";return 0;}
+ const char*k=root_key(r);if(!k){*error="根公钥缺失";return 0;}if(create&&!root_selectable(k)){*error="此根 CA 不可选择";return 0;}
  for(int i=0;i<2;i++)if(!strcmp(k,root_keys[i]))return i+1;
  int empty=-1;for(int i=0;i<CUSTOM_ROOT_SLOTS;i++){char key[16];snprintf(key,sizeof(key),"root_%d",i);size_t n=0;if(nvs_get_str(nv,key,NULL,&n)==ESP_ERR_NVS_NOT_FOUND){if(empty<0)empty=i;continue;}cJSON*j=stored_json(key,2049);const char*existing=root_key(j);bool match=existing&&!strcmp(existing,k);cJSON_Delete(j);if(match)return i+3;}
  if(!create)return 0;
@@ -14,6 +15,7 @@ static int root_slot(cJSON*r,bool create,const char**error){
  char key[16];snprintf(key,sizeof(key),"root_%d",empty);esp_err_t e=nvs_set_str(nv,key,raw);free(raw);if(e==ESP_OK)e=nvs_commit(nv);if(e!=ESP_OK){*error="根证书保存失败，设备存储空间可能不足；现有身份保留";return 0;}return empty+3;
 }
 static void root_profile_row(cJSON*rows,int id,const char*name,const char*key,const char*active,bool connected){
+ if(!root_selectable(key))return;
  char bank[24];if(id<=2)snprintf(bank,sizeof(bank),"%s",id==1?"cert_bh":"cert_bi");else snprintf(bank,sizeof(bank),"cert_p%d",id-3);
  size_t n=0;bool activated=active&&key&&!strcmp(active,key),current=activated||(!active&&selected_ca==id),has=nvs_get_str(nv,bank,NULL,&n)==ESP_OK;
  cJSON*j=cJSON_CreateObject();cJSON_AddNumberToObject(j,"id",id);cJSON_AddStringToObject(j,"name",name?name:"未命名根 CA");cJSON_AddStringToObject(j,"publicKey",key?key:"");cJSON_AddBoolToObject(j,"current",current);cJSON_AddBoolToObject(j,"connected",activated&&connected);cJSON_AddBoolToObject(j,"hasCertificate",has||activated);cJSON_AddBoolToObject(j,"canSwitch",!current||(has&&!activated));cJSON_AddBoolToObject(j,"active",activated);cJSON_AddBoolToObject(j,"builtin",id<=2);cJSON_AddItemToArray(rows,j);
@@ -32,10 +34,9 @@ static esp_err_t roots_page(request_t*r){
 }
 
 #include "preset_qfm_root.inc"
-#include "preset_bg5esn_root.inc"
 #include "preset_rflink_root.inc"
 static esp_err_t roots_seed_defaults(void){
- const char*presets[]={preset_qfm_root,preset_bg5esn_root,preset_rflink_root};
+ const char*presets[]={preset_qfm_root,preset_rflink_root};
  esp_err_t result=ESP_OK;
  for(size_t i=0;i<sizeof(presets)/sizeof(presets[0]);i++){
   cJSON*r=cJSON_Parse(presets[i]);if(!r){result=ESP_ERR_NO_MEM;continue;}

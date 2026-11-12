@@ -32,7 +32,8 @@ static const char *str(const cJSON*j,const char*k){const cJSON*v=cJSON_GetObject
 static bool same(const relay_t*a,const relay_t*b){return a->uid==b->uid&&a->port==b->port&&!strcmp(a->host,b->host)&&!strcmp(a->fingerprint,b->fingerprint)&&!strcmp(a->call,b->call);}
 static void status(const char*s){xSemaphoreTake(mutex,portMAX_DELAY);snprintf(message,sizeof(message),"%s",s);xSemaphoreGive(mutex);}
 static bool current_owner(char out[65]){char call[8];uint32_t uid;return identity(NULL,NULL,call,&uid,out);}
-static bool usable(candidate_t*c,time_t now){return c->verified>0&&now>=c->verified&&now-c->verified<3600&&now>=c->seen&&now-c->seen<1200&&now>=updated&&now-updated<600;}
+static bool fresh(candidate_t*c,time_t now){return now>=c->seen&&now-c->seen<1200&&now>=updated&&now-updated<600;}
+static bool usable(candidate_t*c,time_t now){return c->verified>0&&now>=c->verified&&now-c->verified<3600&&fresh(c,now);}
 static bool parse(const cJSON*j,candidate_t*c,time_t now){
  const char*n=str(j,"name"),*call=str(j,"callsign"),*host=str(j,"host"),*fp=str(j,"fingerprint");
  const cJSON*u=cJSON_GetObjectItemCaseSensitive(j,"uid"),*p=cJSON_GetObjectItemCaseSensitive(j,"port"),*seen=cJSON_GetObjectItemCaseSensitive(j,"lastSeen");uint8_t key[32];
@@ -107,8 +108,8 @@ void discovery_identity_changed(void){
  for(int i=0;i<count;i++)rows[i].verified=rows[i].attempted=0;
  revision++;snprintf(message,sizeof(message),"身份已变更，空闲时刷新并重新验证");xSemaphoreGive(mutex);
 }
-int discovery_list(relay_t out[DISCOVERY_MAX],uint32_t*rev){if(!mutex)return 0;xSemaphoreTake(mutex,portMAX_DELAY);int n=0;if(atomic_load(&owner_valid))for(int i=0;i<count;i++)if(usable(&rows[i],time(NULL)))out[n++]=rows[i].relay;if(rev)*rev=revision;xSemaphoreGive(mutex);return n;}
-const char*discovery_select(int i,uint32_t rev){relay_t list[DISCOVERY_MAX];uint32_t current;int n=discovery_list(list,&current);if(voice_busy())return "通联中不能切换";char actual[65];if(!current_owner(actual))return "设备身份或网络尚未就绪";xSemaphoreTake(mutex,portMAX_DELAY);bool match=!strcmp(actual,owner);xSemaphoreGive(mutex);if(!match)return "身份已变化，请等待重新验证";if(rev!=current||i<0||i>=n)return "列表已更新，请重新选择";
+int discovery_list(relay_t out[DISCOVERY_MAX],uint32_t*rev){if(!mutex)return 0;xSemaphoreTake(mutex,portMAX_DELAY);int n=0;if(atomic_load(&owner_valid))for(int i=0;i<count;i++)if(fresh(&rows[i],time(NULL)))out[n++]=rows[i].relay;if(rev)*rev=revision;xSemaphoreGive(mutex);return n;}
+const char*discovery_select(int i,uint32_t rev){relay_t list[DISCOVERY_MAX];uint32_t current;int n=discovery_list(list,&current);if(voice_busy())return "通联中不能切换";char actual[65];if(!current_owner(actual))return "设备身份或网络尚未就绪";xSemaphoreTake(mutex,portMAX_DELAY);bool match=!strcmp(actual,owner);xSemaphoreGive(mutex);if(!match)return "身份已变化，请刷新列表";if(rev!=current||i<0||i>=n)return "列表已更新，请重新选择";
  for(int k=0;k<relays_count();k++){relay_t r;if(!relays_get(k,&r))continue;if(same(&r,&list[i]))return relays_select(k)?NULL:"保存失败";}
  cJSON*j=cJSON_CreateObject();cJSON_AddStringToObject(j,"name",list[i].name);cJSON_AddStringToObject(j,"callsign",list[i].call);cJSON_AddStringToObject(j,"host",list[i].host);cJSON_AddStringToObject(j,"fingerprint",list[i].fingerprint);cJSON_AddNumberToObject(j,"uid",list[i].uid);cJSON_AddNumberToObject(j,"port",list[i].port);const char*error=relays_add(j);cJSON_Delete(j);if(error)return error;for(int k=0;k<relays_count();k++){relay_t r;if(!relays_get(k,&r))continue;if(same(&r,&list[i]))return relays_select(k)?NULL:"保存失败";}return "保存失败";}
 // Save a fresh, signed candidate without switching or asserting login success.
@@ -136,8 +137,8 @@ cJSON*discovery_json(void){
  cJSON*j=cJSON_CreateObject(),*a=cJSON_AddArrayToObject(j,"servers"),*all=cJSON_AddArrayToObject(j,"candidateServers");int indexes[DISCOVERY_MAX];
  xSemaphoreTake(mutex,portMAX_DELAY);time_t now=time(NULL);bool owned=atomic_load(&owner_valid);int verified=0;
  cJSON_AddNumberToObject(j,"revision",revision);cJSON_AddStringToObject(j,"message",message);cJSON_AddNumberToObject(j,"candidates",count);
- for(int i=0;i<count;i++){indexes[i]=-1;if(!strcmp(candidate_status(&rows[i],now,owned),"verified")){indexes[i]=verified++;cJSON_AddItemToArray(a,node_json(&rows[i].relay));}}
- // Only broadcast candidates; selection requires successful device authentication.
+ for(int i=0;i<count;i++){indexes[i]=-1;if(owned&&fresh(&rows[i],now)){indexes[i]=verified++;cJSON_AddItemToArray(a,node_json(&rows[i].relay));}}
+ // Fresh signed candidates are selectable before actual relay authentication.
  const char*order[]={"verified","checking","pending","unconfirmed","stale"};
  for(unsigned rank=0;rank<5;rank++)for(int i=0;i<count;i++){
   const char*state=candidate_status(&rows[i],now,owned);if(strcmp(state,order[rank]))continue;

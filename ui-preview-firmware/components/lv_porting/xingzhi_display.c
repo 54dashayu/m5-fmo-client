@@ -50,6 +50,6 @@ void lv_port_disp_init(void){
  lv_color_t *a=heap_caps_malloc(240*40*sizeof(lv_color_t),MALLOC_CAP_DMA|MALLOC_CAP_INTERNAL);
  lv_color_t *b=heap_caps_malloc(240*40*sizeof(lv_color_t),MALLOC_CAP_DMA|MALLOC_CAP_INTERNAL);
  assert(a&&b);lv_disp_draw_buf_init(&buf,a,b,240*40);
- lv_disp_drv_init(&drv);drv.hor_res=240;drv.ver_res=240;drv.flush_cb=flush;drv.draw_buf=&buf;lv_disp_drv_register(&drv);
+ lv_disp_drv_init(&drv);drv.sw_rotate=1;drv.hor_res=240;drv.ver_res=240;drv.flush_cb=flush;drv.draw_buf=&buf;lv_disp_drv_register(&drv);
  disp_driver_set_brightness(100);
 }

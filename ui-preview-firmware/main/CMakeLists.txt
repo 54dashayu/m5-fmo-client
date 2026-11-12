@@ -1,6 +1,6 @@
 if(IDF_TARGET STREQUAL "esp32s3")
     set(BOARD_SOURCES "boards/xingzhi/peripherals.c")
-    set(BOARD_DEPS esp_driver_i2s esp_driver_usb_serial_jtag esp_lcd)
+    set(BOARD_DEPS esp_driver_i2s esp_driver_usb_serial_jtag esp_lcd esp_adc)
 elseif(IDF_TARGET STREQUAL "esp32")
     set(BOARD_SOURCES "battery.c" "side_leds.c")
     set(BOARD_DEPS led_strip lvgl_esp32_drivers)

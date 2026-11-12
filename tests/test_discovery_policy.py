@@ -1,7 +1,7 @@
 from pathlib import Path
 import tempfile,subprocess,os
 root=Path(__file__).resolve().parents[1];s=(root/'ui-preview-firmware/main/discovery.c').read_text()
-functions=s[s.index('static const char *str'):s.index('static void status')]+s[s.index('static bool usable'):s.index('static bool fetch_catalog')]
+functions=s[s.index('static const char *str'):s.index('static void status')]+s[s.index('static bool fresh'):s.index('static bool fetch_catalog')]
 prefix=r'''
 #include <string.h>
 #include <stdbool.h>

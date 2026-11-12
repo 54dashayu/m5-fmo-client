@@ -28,6 +28,7 @@ int main(void){const char*error=NULL;cJSON*r=cJSON_Parse(ROOT);assert(r);assert(
  cJSON_ReplaceItemInObjectCaseSensitive(cJSON_GetObjectItemCaseSensitive(r,"subject"),"publicKey",cJSON_CreateString(root_keys[1]));assert(root_slot(r,true,&error)==2);
  cJSON*rows=cJSON_CreateArray();root_profile_row(rows,2,"BI4TES",root_keys[1],root_keys[1],true);root_profile_row(rows,3,"custom","other",root_keys[1],true);root_profile_row(rows,4,"root only","third",root_keys[1],true);
  assert(cJSON_IsTrue(cJSON_GetObjectItem(cJSON_GetArrayItem(rows,0),"connected")));assert(!cJSON_IsTrue(cJSON_GetObjectItem(cJSON_GetArrayItem(rows,1),"connected")));assert(cJSON_IsTrue(cJSON_GetObjectItem(cJSON_GetArrayItem(rows,1),"canSwitch")));assert(cJSON_IsTrue(cJSON_GetObjectItem(cJSON_GetArrayItem(rows,2),"canSwitch")));
+ cJSON_ReplaceItemInObjectCaseSensitive(cJSON_GetObjectItemCaseSensitive(r,"subject"),"publicKey",cJSON_CreateString("DCeeVS320f36ToVP2eOADVN-Q0LzpMYmiVkmNYzuysY"));assert(!root_slot(r,true,&error));int before=cJSON_GetArraySize(rows);root_profile_row(rows,5,"renamed","DCeeVS320f36ToVP2eOADVN-Q0LzpMYmiVkmNYzuysY",NULL,false);assert(cJSON_GetArraySize(rows)==before);
  cJSON_Delete(rows);cJSON_Delete(r);for(int i=0;i<8;i++)free(storage[i]);puts("PASS root registry dedup, storage failure, capacity, builtins, current connection and root-only selection");}
 '''.replace('ROOT',json.dumps(json.dumps(r))).replace('SOURCE',source)
 with tempfile.TemporaryDirectory() as td:

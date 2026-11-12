@@ -3,7 +3,7 @@
 static bool profile_exists(int id){
  if(id==1||id==2)return true;
  if(id<3||id>10)return false;
- char k[32];snprintf(k,sizeof(k),"root_%d",id-3);size_t n=0;return nvs_get_str(nv,k,NULL,&n)==ESP_OK;
+ char k[32];snprintf(k,sizeof(k),"root_%d",id-3);cJSON*r=stored_json(k,2049);bool allowed=root_selectable(root_key(r));cJSON_Delete(r);return allowed;
 }
 static void profile_name_for(int id,char*out,size_t cap){
  if(id<=2){snprintf(out,cap,"%s",id==1?"BH1JSS M5":id==2?"BI4TES / Passport":"尚无证书体系");return;}

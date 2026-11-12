@@ -38,6 +38,7 @@ int nvs_erase_key(int h,const char*k){(void)h;if(fail_write||(++write_count==fai
 int nvs_commit(int h){(void)h;return fail_write||(++write_count==fail_at)?1:0;}
 int nvs_get_u8(int h,const char*k,uint8_t*v){size_t n=1;return nvs_get_blob(h,k,v,&n);}
 int nvs_set_u8(int h,const char*k,uint8_t v){return nvs_set_blob(h,k,&v,1);}
+static bool root_selectable(const char*k){return k&&strcmp(k,"DCeeVS320f36ToVP2eOADVN-Q0LzpMYmiVkmNYzuysY");}
 static int root_slot(cJSON*j,bool create,const char**error){(void)j;(void)create;(void)error;return 1;}
 static const char*js(cJSON*j,const char*k){cJSON*v=cJSON_GetObjectItemCaseSensitive(j,k);return cJSON_IsString(v)?v->valuestring:NULL;}
 static const char*root_key(cJSON*r){return js(cJSON_GetObjectItemCaseSensitive(r,"subject"),"publicKey");}

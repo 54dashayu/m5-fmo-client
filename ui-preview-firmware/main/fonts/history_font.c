@@ -1,7 +1,7 @@
 /*******************************************************************************
  * Size: 18 px
  * Bpp: 4
- * Opts: --font /Users/bh1jss/Documents/ChatGPT/AI Passport项目/github-release/m5-fmo-client/ui-preview-firmware/assets/fonts/NotoSansCJKsc-Bold.otf --size 18 --bpp 4 --format lvgl --no-compress --no-kerning --range 32-126 --lv-font-name history_font -o /Users/bh1jss/Documents/ChatGPT/AI Passport项目/github-release/m5-fmo-client/ui-preview-firmware/main/fonts/history_font.c
+ * Opts: --font /Users/bh1jss/Documents/ChatGPT/AI Passport项目/xingzhi-fmo-adaptation/ui-preview-firmware/assets/fonts/NotoSansCJKsc-Bold.otf --size 18 --bpp 4 --format lvgl --no-compress --no-kerning --range 32-126 --lv-font-name history_font -o /Users/bh1jss/Documents/ChatGPT/AI Passport项目/xingzhi-fmo-adaptation/ui-preview-firmware/main/fonts/history_font.c
  ******************************************************************************/
 
 #ifdef LV_LVGL_H_INCLUDE_SIMPLE

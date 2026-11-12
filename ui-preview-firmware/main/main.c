@@ -1,4 +1,5 @@
 #include "board.h"
+#include "nvs.h"
 #ifdef CONFIG_FMO_BOARD_XINGZHI
 #include "driver/rtc_io.h"
 #endif
@@ -30,10 +31,29 @@ static bool relay_glyph(uint32_t c){lv_font_glyph_dsc_t d;return lv_font_get_gly
 static lv_obj_t *title,*lines[5],*footer,*brand;
 static lv_obj_t *home,*battery_label,*battery_fill,*local_call,*net,*caption,*badge,*call_label,*hint,*relay_name,*relay_id,*home_notice,*last_call,*previous_call,*b_hint,*bars[9];
 static buttons_t keys;
+static uint8_t rotation;
+static bool breathing=true,ptt_latch=true;
+static nvs_handle_t ui_nv;
+static bool ui_nv_ready;
+static int shown=-1;
+static char settings_notice[64];
+#undef FMO_WIDTH
+#define FMO_WIDTH lv_disp_get_hor_res(NULL)
+static void create_ui(void);
+static bool save_settings(uint8_t rot,bool pulse,bool latch){
+ uint32_t packed=rot|(pulse?4:0)|(latch?8:0);
+ if(!ui_nv_ready||nvs_set_u32(ui_nv,"options",packed)!=ESP_OK||nvs_commit(ui_nv)!=ESP_OK){snprintf(settings_notice,sizeof(settings_notice),"设置保存失败，请重试");return false;}
+ rotation=rot;breathing=pulse;ptt_latch=latch;settings_notice[0]=0;return true;
+}
+static void load_settings(void){
+ ui_nv_ready=nvs_open("fmo_ui",NVS_READWRITE,&ui_nv)==ESP_OK;
+ uint32_t packed=12;if(ui_nv_ready&&nvs_get_u32(ui_nv,"options",&packed)==ESP_OK&&packed<=15){rotation=packed&3;breathing=packed&4;ptt_latch=packed&8;}
+}
+
 static display_idle_t display_idle;
 unsigned ui_backlight_percent=100,ui_idle_seconds,ui_pressed_mask;
 unsigned ui_key_events;int ui_last_key=-1,ui_last_action=-1;
-enum {HOME,MENU,RELAYS,VOLUME,IDENTITY,WEB,MIC,DISCOVER,CA_LIST,CA_CONFIRM};
+enum {HOME,MENU,RELAYS,VOLUME,IDENTITY,WEB,MIC,DISCOVER,CA_LIST,CA_CONFIRM,SETTINGS};
 static int page=HOME,selection=0;
 static device_profile_t ca_profiles[DEVICE_PROFILE_MAX],ca_target;
 static int ca_count;
@@ -45,7 +65,7 @@ static relay_t discovered_ui[DISCOVERY_MAX];static int discovered_count;static u
 static bool idle_started=false,was_active=false,show_clock=false;
 static int64_t idle_since;
 static char held_call[16];
-static const char*items[]={"选择中继","音量与静音","设备身份","网页管理","扬声器测试","麦克风测试","返回通联"};
+static const char*items[]={"选择中继","音量与静音","设备身份","网页管理","扬声器测试","麦克风测试","显示与按键","返回通联"};
 static void set_text(lv_obj_t*o,const char*s){if(strcmp(lv_label_get_text(o),s))lv_label_set_text(o,s);}
 static void set_text_fmt(lv_obj_t*o,const char*fmt,...){char text[256];va_list args;va_start(args,fmt);vsnprintf(text,sizeof(text),fmt,args);va_end(args);set_text(o,text);}
 #define lv_label_set_text set_text
@@ -60,9 +80,9 @@ static lv_obj_t *home_label(const char*t,int x,int y,int w,const lv_font_t*f,uin
  lv_obj_t*o=lv_label_create(home);lv_obj_set_pos(o,x,y);lv_obj_set_width(o,w);lv_obj_set_style_text_font(o,f,0);lv_obj_set_style_text_color(o,lv_color_hex(c),0);lv_label_set_long_mode(o,LV_LABEL_LONG_DOT);lv_label_set_text(o,t);return o;
 }
 #ifndef CONFIG_FMO_BOARD_XINGZHI
-static void build_home(void){
+static void build_wide_home(void){
  home=box(lv_scr_act(),0,0,320,240,0x0b151c,0);
- home_label("FMO / M5",12,8,72,&status_font,0xd4e4eb);
+ home_label(FMO_BOARD_TITLE,12,8,72,&status_font,0xd4e4eb);
  local_call=home_label("--",90,8,102,&status_font,0x7ec9ff);
  lv_label_set_long_mode(local_call,LV_LABEL_LONG_SCROLL_CIRCULAR);
  net=home_label("Wi-Fi",198,9,38,&ui_small,0xb4c7d2);lv_obj_set_style_text_align(net,LV_TEXT_ALIGN_RIGHT,0);
@@ -87,12 +107,17 @@ static void build_home(void){
  lv_obj_t*o=home_label("A  音量 -",0,211,106,&ui_small,0xd4e4eb);lv_obj_set_style_text_align(o,LV_TEXT_ALIGN_CENTER,0);
  b_hint=home_label("B  开始发话",106,211,108,&ui_small,0x58d6b2);lv_obj_set_style_text_align(b_hint,LV_TEXT_ALIGN_CENTER,0);
  o=home_label("C  音量 +",214,211,106,&ui_small,0xd4e4eb);lv_obj_set_style_text_align(o,LV_TEXT_ALIGN_CENTER,0);
- const char*sub[]={"长按选中继","短按开始 / 停止","长按进菜单"};for(int i=0;i<3;i++){o=home_label(sub[i],i*107,225,106,&ui_small,0xa9bfcd);lv_obj_set_style_text_align(o,LV_TEXT_ALIGN_CENTER,0);}
+ const char*sub[]={"长按选中继","PTT 模式见设置","长按进菜单"};for(int i=0;i<3;i++){o=home_label(sub[i],i*107,225,106,&ui_small,0xa9bfcd);lv_obj_set_style_text_align(o,LV_TEXT_ALIGN_CENTER,0);}
  lv_obj_add_flag(home,LV_OBJ_FLAG_HIDDEN);
 }
-#else
-#include "boards/xingzhi/home.inc"
 #endif
+#include "boards/xingzhi/home.inc"
+static void build_home(void){
+#ifndef CONFIG_FMO_BOARD_XINGZHI
+ if(FMO_WIDTH==320){build_wide_home();return;}
+#endif
+ build_compact_home();
+}
 static void refresh_home(const device_view_t*v,const voice_view_t*a,const relay_t*r){
  uint32_t accent=a->tx?0xffb778:a->rx?0x7ec9ff:v->mqtt_online?0x58d6b2:0xa8b5bf;
  uint32_t tint=a->tx?0x3b2a20:a->rx?0x193348:v->mqtt_online?0x12352f:0x263139;
@@ -112,18 +137,16 @@ static void refresh_home(const device_view_t*v,const voice_view_t*a,const relay_
  lv_obj_set_style_text_align(call_label,idle?LV_TEXT_ALIGN_CENTER:LV_TEXT_ALIGN_LEFT,0);
  // Keep the large callsign font; scroll only when it exceeds the card width.
  lv_obj_set_style_text_font(call_label,pending_clock?&font20:idle?&ui_clock:&ui_call,0);
- #ifdef CONFIG_FMO_BOARD_XINGZHI
- lv_obj_set_y(call_label,55);if(idle&&!pending_clock)lv_obj_set_style_text_font(call_label,&ui_call,0);
-#else
- lv_obj_set_y(call_label,64);
-#endif
+ lv_obj_set_y(call_label,FMO_WIDTH==240?55:64);if(FMO_WIDTH==240&&idle&&!pending_clock)lv_obj_set_style_text_font(call_label,&ui_call,0);
  lv_label_set_long_mode(call_label,LV_LABEL_LONG_SCROLL_CIRCULAR);
- lv_obj_set_style_text_color(call_label,lv_color_hex(0xffd166),0);
- if(a->tx)lv_label_set_text(hint,"再次短按 B 停止");else lv_label_set_text(hint,idle?"":a->rx?"接收中":v->mqtt_online?"守听中":"中继断开");
+ lv_obj_set_style_text_color(call_label,lv_color_hex(a->tx?0xff5555:a->rx?0x58e68a:0xffd166),0);
+ unsigned phase=(esp_timer_get_time()/1000)%1200;unsigned intensity=phase<600?phase:1200-phase;
+ lv_obj_set_style_text_opa(call_label,breathing&&(a->tx||a->rx)?96+intensity*159/600:255,0);
+ if(a->tx)lv_label_set_text(hint,ptt_latch?"再次短按 B 停止":"松开 B 停止");else lv_label_set_text(hint,idle?"":a->rx?"接收中":v->mqtt_online?"守听中":"中继断开");
  lv_label_set_text(last_call,a->last_caller[0]?a->last_caller:"--");
  lv_label_set_text(previous_call,a->previous_caller[0]?a->previous_caller:"--");
  char name[65];name_for_display(name,sizeof(name),r->name[0]?r->name:r->call,relay_glyph);lv_label_set_text(relay_name,name);lv_label_set_text_fmt(relay_id,"%lu",(unsigned long)r->uid);
- if(a->muted)lv_label_set_text_fmt(home_notice,"%s · 静音",a->notice[0]?a->notice:"守听中");else lv_label_set_text_fmt(home_notice,"%s · 音量 %d%%",a->notice[0]?a->notice:"守听中",a->volume);lv_label_set_text(b_hint,a->tx?"B  停止发话":"B  开始发话");lv_obj_set_style_text_color(b_hint,lv_color_hex(accent),0);
+ if(a->muted)lv_label_set_text_fmt(home_notice,"%s · 静音",a->notice[0]?a->notice:"守听中");else lv_label_set_text_fmt(home_notice,"%s · 音量 %d%%",a->notice[0]?a->notice:"守听中",a->volume);lv_label_set_text(b_hint,ptt_latch?(a->tx?"B  停止发话":"B  开始发话"):"B 按住发话");lv_obj_set_style_text_color(b_hint,lv_color_hex(accent),0);
  int peak=a->tx?a->mic_peak:a->rx?a->speaker_peak:0;int level=peak/1800;if(level>9)level=9;
  for(int i=0;i<9;i++){int h=i<level?5+(i%3)*4:3;lv_obj_set_pos(bars[i],(FMO_WIDTH==240?180:247)+i*5,(FMO_WIDTH==240?113:119)-h);lv_obj_set_height(bars[i],h);lv_obj_set_style_bg_color(bars[i],lv_color_hex(i<level?accent:0x35505f),0);}
 }
@@ -133,8 +156,14 @@ static void key(int k,key_action_t action,void*ctx){(void)ctx;ui_key_events++;ui
  if(action==KEY_PTT_START){if(page==HOME)voice_ptt(true);return;}
  if(action==KEY_LONG){if(page==HOME){if(k==0)go(RELAYS);if(k==1)voice_ptt(false);if(k==2)go(MENU);}else if(k==0)go(HOME);return;}
  if(action!=KEY_SHORT)return;
- if(page==HOME){if(k==0)voice_volume(-5);if(k==1)voice_toggle_ptt();if(k==2)voice_volume(5);return;}
- if(page==MENU){if(k==0)selection=(selection+6)%7;if(k==2)selection=(selection+1)%7;if(k==1){int target=selection;if(target==0)go(RELAYS);else if(target==1)go(VOLUME);else if(target==2)go(IDENTITY);else if(target==3)go(WEB);else if(target==4)voice_tone();else if(target==5)go(MIC);else go(HOME);}return;}
+ if(page==HOME){if(k==0)voice_volume(-5);if(k==1&&ptt_latch)voice_toggle_ptt();if(k==2)voice_volume(5);return;}
+ if(page==MENU){if(k==0)selection=(selection+7)%8;if(k==2)selection=(selection+1)%8;if(k==1){int target=selection;if(target==0)go(RELAYS);else if(target==1)go(VOLUME);else if(target==2)go(IDENTITY);else if(target==3)go(WEB);else if(target==4)voice_tone();else if(target==5)go(MIC);else if(target==6)go(SETTINGS);else go(HOME);}return;}
+ if(page==SETTINGS){
+ if(k==0){selection=(selection+2)%3;}if(k==2)selection=(selection+1)%3;
+ if(k==1){voice_ptt(false);if(selection==0){if(save_settings((rotation+1)%4,breathing,ptt_latch)){lv_disp_set_rotation(NULL,(lv_disp_rot_t)rotation);create_ui();}}
+ else if(selection==1)save_settings(rotation,!breathing,ptt_latch);
+ else if(save_settings(rotation,breathing,!ptt_latch))buttons_set_momentary(&keys,!ptt_latch);}
+ return;}
  if(page==RELAYS){int n=relays_count(),pos=relays_order_position(selection);if(k==0){pos=(pos+n)%(n+1);selection=pos==n?-1:relays_order_at(pos);}if(k==2){pos=(pos+1)%(n+1);selection=pos==n?-1:relays_order_at(pos);}if(k==1){if(selection<0)go(DISCOVER);else if(device_select_relay(selection))go(HOME);}return;}
  if(page==DISCOVER){int n=discovered_count+1;if(k==0)selection=(selection+n-1)%n;if(k==2)selection=(selection+1)%n;if(k==1){if(selection==discovered_count){discovery_refresh();discovered_count=discovery_list(discovered_ui,&discovered_revision);selection=0;snprintf(discovery_notice,sizeof(discovery_notice),"空闲时刷新，稍后再查看");}else{const char*error=discovery_select(selection,discovered_revision);if(!error)go(HOME);else snprintf(discovery_notice,sizeof(discovery_notice),"%s",error);}}return;}
  if(page==IDENTITY){if(k==1)go(CA_LIST);return;}
@@ -151,14 +180,20 @@ static void refresh(void){
  if(a.tx||!held_call[0])snprintf(held_call,sizeof(held_call),"M.%s",v.call);
  if(a.rx&&!a.tx)snprintf(held_call,sizeof(held_call),"%s",a.caller[0]?a.caller:"--");
  relay_t relay;int current=relays_current(&relay,NULL);
- static int shown=-1;if(shown!=page){for(int i=0;i<5;i++){lv_label_set_text(lines[i],"");lv_obj_set_pos(lines[i],12,70+i*27);lv_obj_set_style_text_color(lines[i],lv_color_hex(0xecf2f8),0);lv_obj_set_style_text_font(lines[i],(page==RELAYS||page==DISCOVER||page==CA_LIST||page==CA_CONFIRM||page==IDENTITY)?&relay_font:&status_font,0);lv_label_set_long_mode(lines[i],FMO_WIDTH==240?LV_LABEL_LONG_SCROLL_CIRCULAR:LV_LABEL_LONG_DOT);}shown=page;bool is_home=page==HOME;if(is_home)lv_obj_clear_flag(home,LV_OBJ_FLAG_HIDDEN);else lv_obj_add_flag(home,LV_OBJ_FLAG_HIDDEN);lv_obj_t*old[]={brand,title,footer,lines[0],lines[1],lines[2],lines[3],lines[4]};for(unsigned i=0;i<8;i++){if(is_home)lv_obj_add_flag(old[i],LV_OBJ_FLAG_HIDDEN);else lv_obj_clear_flag(old[i],LV_OBJ_FLAG_HIDDEN);}}
+ if(shown!=page){for(int i=0;i<5;i++){lv_label_set_text(lines[i],"");lv_obj_set_pos(lines[i],12,70+i*27);lv_obj_set_style_text_color(lines[i],lv_color_hex(0xecf2f8),0);lv_obj_set_style_text_font(lines[i],(page==RELAYS||page==DISCOVER||page==CA_LIST||page==CA_CONFIRM||page==IDENTITY)?&relay_font:&status_font,0);lv_label_set_long_mode(lines[i],FMO_WIDTH==240?LV_LABEL_LONG_SCROLL_CIRCULAR:LV_LABEL_LONG_DOT);}shown=page;bool is_home=page==HOME;if(is_home)lv_obj_clear_flag(home,LV_OBJ_FLAG_HIDDEN);else lv_obj_add_flag(home,LV_OBJ_FLAG_HIDDEN);lv_obj_t*old[]={brand,title,footer,lines[0],lines[1],lines[2],lines[3],lines[4]};for(unsigned i=0;i<8;i++){if(is_home)lv_obj_add_flag(old[i],LV_OBJ_FLAG_HIDDEN);else lv_obj_clear_flag(old[i],LV_OBJ_FLAG_HIDDEN);}}
  lv_label_set_text_fmt(brand,(page==RELAYS||page==DISCOVER)?"体系：%s":FMO_BOARD_TITLE " · %s",(page==RELAYS||page==DISCOVER)?relays_profile_name():FMO_VERSION);
  lv_obj_set_pos(footer,12,220);lv_obj_set_style_text_font(footer,&status_font,0);lv_obj_set_style_text_color(footer,lv_color_hex(0x70d5ae),0);lv_label_set_text(footer,"长按 A 返回       B 确认");
  if(page==HOME){
   refresh_home(&v,&a,&relay);
- }else if(page==MENU){lv_label_set_text_fmt(title,"设备菜单  %d/2",selection/5+1);for(int i=0;i<5;i++){int n=(selection/5)*5+i;if(n<7)lv_label_set_text_fmt(lines[i],"%s %s",n==selection?">":" ",items[n]);else lv_label_set_text(lines[i],"");}lv_label_set_text(footer,"A 上项  B 确认  C 下项 / 长按A返回");
+ }else if(page==MENU){lv_label_set_text_fmt(title,"设备菜单  %d/2",selection/5+1);for(int i=0;i<5;i++){int n=(selection/5)*5+i;if(n<8)lv_label_set_text_fmt(lines[i],"%s %s",n==selection?">":" ",items[n]);else lv_label_set_text(lines[i],"");}lv_label_set_text(footer,"A 上项  B 确认  C 下项 / 长按A返回");
  }else if(page==RELAYS){int n=relays_count();if(selection>=n)selection=current<n?current:-1;int pos=relays_order_position(selection);int total=n+1,start=pos/4*4;lv_label_set_text_fmt(title,"选择中继 %d/%d",pos/4+1,(total+3)/4);for(int i=0;i<4;i++){int p=start+i;lv_obj_set_style_text_color(lines[i],lv_color_hex(p==n?0xffc567:0xecf2f8),0);if(p>=total)lv_label_set_text(lines[i],"");else if(p==n)lv_label_set_text_fmt(lines[i],"%s + 发现中继",selection<0?">":" ");else{int index=relays_order_at(p);relay_t r={0};if(!relays_get(index,&r)){lv_label_set_text(lines[i],"");continue;}char name[65];name_for_display(name,sizeof(name),r.name[0]?r.name:r.call,relay_glyph);lv_label_set_text_fmt(lines[i],"%s %s%s / %s",selection==index?">":" ",current==index?"[当前] ":"",name,r.call);}}lv_label_set_text_fmt(lines[4],"体系：%s",relays_profile_name());lv_label_set_text(footer,"A 上项  B 确认  C 下项 / 长按A返回");
  }else if(page==DISCOVER){relay_t fresh[DISCOVERY_MAX];uint32_t rev;int num=discovery_list(fresh,&rev);if(rev!=discovered_revision||num!=discovered_count){relay_t old={0};bool was_refresh=selection==discovered_count;if(selection<discovered_count)old=discovered_ui[selection];memcpy(discovered_ui,fresh,num*sizeof(relay_t));discovered_count=num;discovered_revision=rev;discovery_notice[0]=0;selection=was_refresh?num:0;for(int i=0;!was_refresh&&i<num;i++)if(fresh[i].uid==old.uid&&!strcmp(fresh[i].fingerprint,old.fingerprint))selection=i;}int total=discovered_count+1,start=selection/4*4;lv_label_set_text_fmt(title,"发现中继 %d/%d",selection/4+1,(total+3)/4);for(int i=0;i<4;i++){int p=start+i;if(p>=total)lv_label_set_text(lines[i],"");else if(p==discovered_count)lv_label_set_text_fmt(lines[i],"%s 刷新列表",selection==p?">":" ");else{char name[65];name_for_display(name,sizeof(name),discovered_ui[p].name,relay_glyph);lv_label_set_text_fmt(lines[i],"%s %s",selection==p?">":" ",name);}}char progress[96];discovery_status(progress,sizeof(progress));lv_label_set_text(lines[4],discovery_notice[0]?discovery_notice:progress);lv_label_set_text(footer,"A 上项  B 选择  C 下项 / 长按A返回");
+ }else if(page==SETTINGS){lv_label_set_text(title,"显示与按键");
+ lv_label_set_text_fmt(lines[0],"%s 屏幕翻转：%d 度",selection==0?">":" ",rotation*90);
+ lv_label_set_text_fmt(lines[1],"%s 呼吸灯：%s",selection==1?">":" ",breathing?"开启":"关闭");
+ lv_label_set_text_fmt(lines[2],"%s PTT 保持：%s",selection==2?">":" ",ptt_latch?"开启":"关闭");
+ lv_label_set_text(lines[3],ptt_latch?"短按 B 开始，再按停止":"按住 B 发话，松开停止");lv_label_set_text(lines[4],settings_notice);
+ lv_label_set_text(footer,"A 上项 B 更改 C 下项 / 长按A返回");
  }else if(page==VOLUME){lv_label_set_text(title,"音量与静音");lv_label_set_text_fmt(lines[0],"扬声器音量：%d%%",a.volume);lv_label_set_text(lines[1],a.muted?"当前静音":"声音已开启");lv_label_set_text(footer,"A 减小  B 静音  C 增大 / 长按A返回");
  }else if(page==IDENTITY){lv_label_set_text(title,"设备身份");lv_label_set_text_fmt(lines[0],"呼号：M.%s",v.call);lv_label_set_text(lines[1],v.identity);lv_label_set_text_fmt(lines[2],"当前：%s",ca_current[0]?ca_current:"等待读取");lv_label_set_text(lines[3],"B 切换根 CA");lv_obj_set_style_text_font(lines[3],&font20,0);lv_obj_set_style_text_color(lines[3],lv_color_hex(0xffd166),0);lv_obj_set_pos(lines[3],12,158);lv_label_set_text(lines[4],"切换后自动刷新中继候选");lv_obj_set_pos(lines[4],12,194);lv_label_set_text(footer,"长按 A 返回");
  }else if(page==CA_LIST){int total=ca_count?ca_count:1,start=selection/4*4;lv_label_set_text_fmt(title,"根 CA 列表 %d/%d",selection/4+1,(total+3)/4);for(int i=0;i<4;i++){int n=start+i;if(n>=ca_count)lv_label_set_text(lines[i],"");else{device_profile_t*p=&ca_profiles[n];lv_label_set_text_fmt(lines[i],"%s %s%s",selection==n?">":" ",p->current?"[当前] ":!p->has_certificate?"[仅根] ":"",p->name);lv_obj_set_style_text_color(lines[i],lv_color_hex(p->current?0xffd166:0xecf2f8),0);}}lv_label_set_text(lines[4],ca_notice[0]?ca_notice:"无证书可选择，再去网页申请");lv_label_set_text(footer,"A 上项  B 确认  C 下项 / 长按A返回");
@@ -180,6 +215,15 @@ static void verify_fonts(void){
  ESP_LOGI("ui_fonts","coverage: %u codepoints x 3 sizes plus callsign ASCII, missing=%u",(unsigned)(sizeof(ui_font_codepoints)/sizeof(ui_font_codepoints[0])),missing);
  assert(missing==0);
 }
+static void create_ui(void){
+ lv_obj_clean(lv_scr_act());shown=-1;
+ lv_obj_set_style_bg_color(lv_scr_act(),lv_color_hex(0x0d151d),0);lv_obj_clear_flag(lv_scr_act(),LV_OBJ_FLAG_SCROLLABLE);
+ brand=label(FMO_BOARD_TITLE " · " FMO_VERSION,12,8,&status_font,0x9baab8);
+ title=label("正在启动网页后台",12,32,&font20,0xf6ad74);
+ for(int i=0;i<5;i++)lines[i]=label("",12,70+i*27,&status_font,0xecf2f8);
+ footer=label("正在启动",12,220,&status_font,0x70d5ae);lv_label_set_long_mode(footer,LV_LABEL_LONG_SCROLL_CIRCULAR);lv_label_set_long_mode(brand,LV_LABEL_LONG_DOT);
+ build_home();
+}
 void app_main(void){
  #ifdef CONFIG_FMO_BOARD_XINGZHI
  // Power hold from the reference board. Do not use M5 I2C on GPIO21.
@@ -193,15 +237,11 @@ void app_main(void){
  };ESP_ERROR_CHECK(gpio_config(&cfg));
  side_leds_init();battery_init();
  lv_init();verify_fonts();lv_port_disp_set_rotation(0);lv_port_disp_init();
- lv_obj_set_style_bg_color(lv_scr_act(),lv_color_hex(0x0d151d),0);lv_obj_clear_flag(lv_scr_act(),LV_OBJ_FLAG_SCROLLABLE);
- brand=label(FMO_BOARD_TITLE " · " FMO_VERSION,12,8,&status_font,0x9baab8);
- title=label("正在启动网页后台",12,32,&font20,0xf6ad74);
- for(int i=0;i<5;i++)lines[i]=label("",12,70+i*27,&status_font,0xecf2f8);
- footer=label("正在启动",12,220,&status_font,0x70d5ae);lv_label_set_long_mode(footer,LV_LABEL_LONG_SCROLL_CIRCULAR);lv_label_set_long_mode(brand,LV_LABEL_LONG_DOT);
- build_home();
+ create_ui();
  const esp_timer_create_args_t ta={.callback=tick,.name="lv_tick"};esp_timer_handle_t timer;ESP_ERROR_CHECK(esp_timer_create(&ta,&timer));ESP_ERROR_CHECK(esp_timer_start_periodic(timer,1000));
  lv_timer_handler();esp_err_t result=device_web_start();
  if(result!=ESP_OK){lv_label_set_text(title,"USB 后台启动失败");ESP_LOGE("main","init: %s",esp_err_to_name(result));}
- int pins[3]={FMO_KEY_A,FMO_KEY_B,FMO_KEY_C};uint8_t initial=0;for(int i=0;i<3;i++)if(!gpio_get_level(pins[i]))initial|=1<<i;buttons_init(&keys,initial,key,NULL);int64_t updated=0,led_updated=0;
- while(1){int64_t now=esp_timer_get_time();uint8_t pressed=0;for(int i=0;i<3;i++)if(!gpio_get_level(pins[i]))pressed|=1<<i;if(result==ESP_OK){if(now-led_updated>=25000){voice_view_t led_voice;voice_view(&led_voice);side_leds_update(led_voice.tx,led_voice.rx,now/1000);unsigned brightness=display_idle_step(&display_idle,now/1000,led_voice.tx||led_voice.rx||pressed);ui_idle_seconds=(now/1000-display_idle.last_activity)/1000;ui_pressed_mask=pressed;if(brightness!=ui_backlight_percent){disp_driver_set_brightness(brightness);ui_backlight_percent=brightness;}led_updated=now;}buttons_step(&keys,pressed,now/1000,page==HOME);if(now-updated>150000){refresh();updated=now;}}lv_timer_handler();vTaskDelay(pdMS_TO_TICKS(10));}
+ if(result==ESP_OK){load_settings();lv_disp_set_rotation(NULL,(lv_disp_rot_t)rotation);create_ui();}
+ int pins[3]={FMO_KEY_A,FMO_KEY_B,FMO_KEY_C};uint8_t initial=0;for(int i=0;i<3;i++)if(!gpio_get_level(pins[i]))initial|=1<<i;buttons_init(&keys,initial,key,NULL);buttons_set_momentary(&keys,!ptt_latch);int64_t updated=0,led_updated=0;
+ while(1){int64_t now=esp_timer_get_time();uint8_t pressed=0;for(int i=0;i<3;i++)if(!gpio_get_level(pins[i]))pressed|=1<<i;if(result==ESP_OK){if(now-led_updated>=25000){voice_view_t led_voice;voice_view(&led_voice);side_leds_update(breathing&&led_voice.tx,breathing&&led_voice.rx,now/1000);unsigned brightness=display_idle_step(&display_idle,now/1000,led_voice.tx||led_voice.rx||pressed);ui_idle_seconds=(now/1000-display_idle.last_activity)/1000;ui_pressed_mask=pressed;if(brightness!=ui_backlight_percent){disp_driver_set_brightness(brightness);ui_backlight_percent=brightness;}led_updated=now;}buttons_step(&keys,pressed,now/1000,page==HOME);if(now-updated>150000){refresh();updated=now;}}lv_timer_handler();vTaskDelay(pdMS_TO_TICKS(10));}
 }
