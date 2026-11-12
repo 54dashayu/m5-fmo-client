@@ -1,0 +1,12 @@
+menu "FMO board"
+choice FMO_BOARD
+    prompt "FMO hardware"
+    default FMO_BOARD_M5_FIRE
+config FMO_BOARD_M5_FIRE
+    bool "M5 FIRE (original ESP32)"
+    depends on IDF_TARGET_ESP32
+config FMO_BOARD_XINGZHI
+    bool "Xingzhi Cube 1.54 TFT Wi-Fi"
+    depends on IDF_TARGET_ESP32S3
+endchoice
+endmenu

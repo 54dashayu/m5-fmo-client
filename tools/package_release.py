@@ -6,12 +6,15 @@ parser=argparse.ArgumentParser()
 parser.add_argument("--app-bin",type=Path,help="Use a previously device-validated application image")
 args=parser.parse_args()
 root=Path(__file__).resolve().parents[1]
-version=re.search(r'PROJECT_VER "([^"]+)"',(root/'ui-preview-firmware/CMakeLists.txt').read_text())[1]
 build=root/'ui-preview-firmware/build'
+desc=json.loads((build/'project_description.json').read_text())
+assert desc.get('target')=='esp32', "M5 release packager refuses non-ESP32 firmware"
+version=desc['project_version']
 out=root/'release-dist'/('v'+version);out.mkdir(parents=True,exist_ok=True)
 parts=[]
 for source,name,offset in [('bootloader/bootloader.bin','bootloader.bin',0x1000),('partition_table/partition-table.bin','partition-table.bin',0x8000),('m5-fmo-ui-preview.bin',f'm5-fmo-client-v{version}-app.bin',0x10000)]:
  data=(args.app_bin if offset==0x10000 and args.app_bin else build/source).read_bytes()
+ if offset!=0x8000: assert data[0]==0xe9 and data[12:14]==b"\0\0", "M5 packager refuses a non-ESP32 image"
  if offset==0x10000:
   assert data[48:80].split(b"\0",1)[0].decode()==version, "application version does not match source"
  assert offset+len(data)<={0x1000:0x8000,0x8000:0x9000,0x10000:0x310000}[offset], 'image overlaps protected data'

@@ -1,9 +1,5 @@
-file(GLOB_RECURSE SOURCES   ./*.c
-							)
-
-idf_component_register(SRCS ${SOURCES}
-                   INCLUDE_DIRS
-                                .
-                    REQUIRES  lvgl
-                              lvgl_esp32_drivers
-                              )
+if(IDF_TARGET STREQUAL "esp32s3")
+    idf_component_register(SRCS "xingzhi_display.c" INCLUDE_DIRS "." REQUIRES fmo_board lvgl esp_lcd driver)
+else()
+    idf_component_register(SRCS "lv_port_disp.c" INCLUDE_DIRS "." REQUIRES lvgl lvgl_esp32_drivers)
+endif()

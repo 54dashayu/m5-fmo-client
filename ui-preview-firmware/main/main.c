@@ -1,3 +1,7 @@
+#include "board.h"
+#ifdef CONFIG_FMO_BOARD_XINGZHI
+#include "driver/rtc_io.h"
+#endif
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/gpio.h"
@@ -5,7 +9,7 @@
 #include "esp_timer.h"
 #include "lvgl.h"
 #include "lv_port_disp.h"
-#include "disp_driver.h"
+#include "fmo_display.h"
 #include "display_idle.h"
 #include "device_web.h"
 #include <assert.h>
@@ -47,7 +51,7 @@ static void set_text_fmt(lv_obj_t*o,const char*fmt,...){char text[256];va_list a
 #define lv_label_set_text set_text
 #define lv_label_set_text_fmt set_text_fmt
 static lv_obj_t *label(const char *text,int x,int y,const lv_font_t *font,uint32_t color){
- lv_obj_t *o=lv_label_create(lv_scr_act());lv_label_set_text(o,text);lv_obj_set_pos(o,x,y);lv_obj_set_width(o,296);lv_obj_set_style_text_font(o,font,0);lv_obj_set_style_text_color(o,lv_color_hex(color),0);return o;
+ lv_obj_t *o=lv_label_create(lv_scr_act());lv_label_set_text(o,text);lv_obj_set_pos(o,x,y);lv_obj_set_width(o,FMO_WIDTH-24);lv_obj_set_style_text_font(o,font,0);lv_obj_set_style_text_color(o,lv_color_hex(color),0);return o;
 }
 static lv_obj_t *box(lv_obj_t*p,int x,int y,int w,int h,uint32_t bg,int radius){
  lv_obj_t*o=lv_obj_create(p);lv_obj_remove_style_all(o);lv_obj_set_pos(o,x,y);lv_obj_set_size(o,w,h);lv_obj_set_style_bg_opa(o,LV_OPA_COVER,0);lv_obj_set_style_bg_color(o,lv_color_hex(bg),0);lv_obj_set_style_radius(o,radius,0);lv_obj_clear_flag(o,LV_OBJ_FLAG_SCROLLABLE);return o;
@@ -55,6 +59,7 @@ static lv_obj_t *box(lv_obj_t*p,int x,int y,int w,int h,uint32_t bg,int radius){
 static lv_obj_t *home_label(const char*t,int x,int y,int w,const lv_font_t*f,uint32_t c){
  lv_obj_t*o=lv_label_create(home);lv_obj_set_pos(o,x,y);lv_obj_set_width(o,w);lv_obj_set_style_text_font(o,f,0);lv_obj_set_style_text_color(o,lv_color_hex(c),0);lv_label_set_long_mode(o,LV_LABEL_LONG_DOT);lv_label_set_text(o,t);return o;
 }
+#ifndef CONFIG_FMO_BOARD_XINGZHI
 static void build_home(void){
  home=box(lv_scr_act(),0,0,320,240,0x0b151c,0);
  home_label("FMO / M5",12,8,72,&status_font,0xd4e4eb);
@@ -85,6 +90,9 @@ static void build_home(void){
  const char*sub[]={"长按选中继","短按开始 / 停止","长按进菜单"};for(int i=0;i<3;i++){o=home_label(sub[i],i*107,225,106,&ui_small,0xa9bfcd);lv_obj_set_style_text_align(o,LV_TEXT_ALIGN_CENTER,0);}
  lv_obj_add_flag(home,LV_OBJ_FLAG_HIDDEN);
 }
+#else
+#include "boards/xingzhi/home.inc"
+#endif
 static void refresh_home(const device_view_t*v,const voice_view_t*a,const relay_t*r){
  uint32_t accent=a->tx?0xffb778:a->rx?0x7ec9ff:v->mqtt_online?0x58d6b2:0xa8b5bf;
  uint32_t tint=a->tx?0x3b2a20:a->rx?0x193348:v->mqtt_online?0x12352f:0x263139;
@@ -104,7 +112,11 @@ static void refresh_home(const device_view_t*v,const voice_view_t*a,const relay_
  lv_obj_set_style_text_align(call_label,idle?LV_TEXT_ALIGN_CENTER:LV_TEXT_ALIGN_LEFT,0);
  // Keep the large callsign font; scroll only when it exceeds the card width.
  lv_obj_set_style_text_font(call_label,pending_clock?&font20:idle?&ui_clock:&ui_call,0);
+ #ifdef CONFIG_FMO_BOARD_XINGZHI
+ lv_obj_set_y(call_label,55);if(idle&&!pending_clock)lv_obj_set_style_text_font(call_label,&ui_call,0);
+#else
  lv_obj_set_y(call_label,64);
+#endif
  lv_label_set_long_mode(call_label,LV_LABEL_LONG_SCROLL_CIRCULAR);
  lv_obj_set_style_text_color(call_label,lv_color_hex(0xffd166),0);
  if(a->tx)lv_label_set_text(hint,"再次短按 B 停止");else lv_label_set_text(hint,idle?"":a->rx?"接收中":v->mqtt_online?"守听中":"中继断开");
@@ -113,7 +125,7 @@ static void refresh_home(const device_view_t*v,const voice_view_t*a,const relay_
  char name[65];name_for_display(name,sizeof(name),r->name[0]?r->name:r->call,relay_glyph);lv_label_set_text(relay_name,name);lv_label_set_text_fmt(relay_id,"%lu",(unsigned long)r->uid);
  if(a->muted)lv_label_set_text_fmt(home_notice,"%s · 静音",a->notice[0]?a->notice:"守听中");else lv_label_set_text_fmt(home_notice,"%s · 音量 %d%%",a->notice[0]?a->notice:"守听中",a->volume);lv_label_set_text(b_hint,a->tx?"B  停止发话":"B  开始发话");lv_obj_set_style_text_color(b_hint,lv_color_hex(accent),0);
  int peak=a->tx?a->mic_peak:a->rx?a->speaker_peak:0;int level=peak/1800;if(level>9)level=9;
- for(int i=0;i<9;i++){int h=i<level?5+(i%3)*4:3;lv_obj_set_pos(bars[i],247+i*5,119-h);lv_obj_set_height(bars[i],h);lv_obj_set_style_bg_color(bars[i],lv_color_hex(i<level?accent:0x35505f),0);}
+ for(int i=0;i<9;i++){int h=i<level?5+(i%3)*4:3;lv_obj_set_pos(bars[i],(FMO_WIDTH==240?180:247)+i*5,(FMO_WIDTH==240?113:119)-h);lv_obj_set_height(bars[i],h);lv_obj_set_style_bg_color(bars[i],lv_color_hex(i<level?accent:0x35505f),0);}
 }
 static void go(int next){voice_ptt(false);voice_mic_test(false);page=next;device_management_ap(next==WEB);selection=0;buttons_block(&keys);if(next==RELAYS)selection=relays_current(NULL,NULL);if(next==CA_CONFIRM)ca_submitted=false;if(next==MIC)voice_mic_test(true);if(next==IDENTITY||next==CA_LIST)load_ca_profiles();if(next==DISCOVER){discovered_count=discovery_list(discovered_ui,&discovered_revision);discovery_refresh();discovery_notice[0]=0;}}
 static void key(int k,key_action_t action,void*ctx){(void)ctx;ui_key_events++;ui_last_key=k;ui_last_action=action;ESP_LOGI("buttons","key=%d action=%d",k,action);
@@ -139,8 +151,8 @@ static void refresh(void){
  if(a.tx||!held_call[0])snprintf(held_call,sizeof(held_call),"M.%s",v.call);
  if(a.rx&&!a.tx)snprintf(held_call,sizeof(held_call),"%s",a.caller[0]?a.caller:"--");
  relay_t relay;int current=relays_current(&relay,NULL);
- static int shown=-1;if(shown!=page){for(int i=0;i<5;i++){lv_label_set_text(lines[i],"");lv_obj_set_pos(lines[i],12,70+i*27);lv_obj_set_style_text_color(lines[i],lv_color_hex(0xecf2f8),0);lv_obj_set_style_text_font(lines[i],(page==RELAYS||page==DISCOVER||page==CA_LIST||page==CA_CONFIRM||page==IDENTITY)?&relay_font:&status_font,0);lv_label_set_long_mode(lines[i],LV_LABEL_LONG_DOT);}shown=page;bool is_home=page==HOME;if(is_home)lv_obj_clear_flag(home,LV_OBJ_FLAG_HIDDEN);else lv_obj_add_flag(home,LV_OBJ_FLAG_HIDDEN);lv_obj_t*old[]={brand,title,footer,lines[0],lines[1],lines[2],lines[3],lines[4]};for(unsigned i=0;i<8;i++){if(is_home)lv_obj_add_flag(old[i],LV_OBJ_FLAG_HIDDEN);else lv_obj_clear_flag(old[i],LV_OBJ_FLAG_HIDDEN);}}
- lv_label_set_text_fmt(brand,(page==RELAYS||page==DISCOVER)?"体系：%s":"FMO / M5 FIRE · %s",(page==RELAYS||page==DISCOVER)?relays_profile_name():"0.7.29");
+ static int shown=-1;if(shown!=page){for(int i=0;i<5;i++){lv_label_set_text(lines[i],"");lv_obj_set_pos(lines[i],12,70+i*27);lv_obj_set_style_text_color(lines[i],lv_color_hex(0xecf2f8),0);lv_obj_set_style_text_font(lines[i],(page==RELAYS||page==DISCOVER||page==CA_LIST||page==CA_CONFIRM||page==IDENTITY)?&relay_font:&status_font,0);lv_label_set_long_mode(lines[i],FMO_WIDTH==240?LV_LABEL_LONG_SCROLL_CIRCULAR:LV_LABEL_LONG_DOT);}shown=page;bool is_home=page==HOME;if(is_home)lv_obj_clear_flag(home,LV_OBJ_FLAG_HIDDEN);else lv_obj_add_flag(home,LV_OBJ_FLAG_HIDDEN);lv_obj_t*old[]={brand,title,footer,lines[0],lines[1],lines[2],lines[3],lines[4]};for(unsigned i=0;i<8;i++){if(is_home)lv_obj_add_flag(old[i],LV_OBJ_FLAG_HIDDEN);else lv_obj_clear_flag(old[i],LV_OBJ_FLAG_HIDDEN);}}
+ lv_label_set_text_fmt(brand,(page==RELAYS||page==DISCOVER)?"体系：%s":FMO_BOARD_TITLE " · %s",(page==RELAYS||page==DISCOVER)?relays_profile_name():FMO_VERSION);
  lv_obj_set_pos(footer,12,220);lv_obj_set_style_text_font(footer,&status_font,0);lv_obj_set_style_text_color(footer,lv_color_hex(0x70d5ae),0);lv_label_set_text(footer,"长按 A 返回       B 确认");
  if(page==HOME){
   refresh_home(&v,&a,&relay);
@@ -169,18 +181,27 @@ static void verify_fonts(void){
  assert(missing==0);
 }
 void app_main(void){
- gpio_config_t cfg={.pin_bit_mask=(1ULL<<39)|(1ULL<<38)|(1ULL<<37),.mode=GPIO_MODE_INPUT};ESP_ERROR_CHECK(gpio_config(&cfg));
+ #ifdef CONFIG_FMO_BOARD_XINGZHI
+ // Power hold from the reference board. Do not use M5 I2C on GPIO21.
+ ESP_ERROR_CHECK(rtc_gpio_hold_dis(FMO_POWER_HOLD));ESP_ERROR_CHECK(rtc_gpio_deinit(FMO_POWER_HOLD));
+ gpio_config_t power={.pin_bit_mask=1ULL<<FMO_POWER_HOLD,.mode=GPIO_MODE_OUTPUT};ESP_ERROR_CHECK(gpio_config(&power));ESP_ERROR_CHECK(gpio_set_level(FMO_POWER_HOLD,1));
+#endif
+ gpio_config_t cfg={.pin_bit_mask=(1ULL<<FMO_KEY_A)|(1ULL<<FMO_KEY_B)|(1ULL<<FMO_KEY_C),.mode=GPIO_MODE_INPUT
+#ifdef CONFIG_FMO_BOARD_XINGZHI
+ ,.pull_up_en=GPIO_PULLUP_ENABLE
+#endif
+ };ESP_ERROR_CHECK(gpio_config(&cfg));
  side_leds_init();battery_init();
  lv_init();verify_fonts();lv_port_disp_set_rotation(0);lv_port_disp_init();
  lv_obj_set_style_bg_color(lv_scr_act(),lv_color_hex(0x0d151d),0);lv_obj_clear_flag(lv_scr_act(),LV_OBJ_FLAG_SCROLLABLE);
- brand=label("FMO / M5 FIRE  ·  0.7.29",12,8,&status_font,0x9baab8);
+ brand=label(FMO_BOARD_TITLE " · " FMO_VERSION,12,8,&status_font,0x9baab8);
  title=label("正在启动网页后台",12,32,&font20,0xf6ad74);
  for(int i=0;i<5;i++)lines[i]=label("",12,70+i*27,&status_font,0xecf2f8);
- footer=label("正在启动",12,220,&status_font,0x70d5ae);
+ footer=label("正在启动",12,220,&status_font,0x70d5ae);lv_label_set_long_mode(footer,LV_LABEL_LONG_SCROLL_CIRCULAR);lv_label_set_long_mode(brand,LV_LABEL_LONG_DOT);
  build_home();
  const esp_timer_create_args_t ta={.callback=tick,.name="lv_tick"};esp_timer_handle_t timer;ESP_ERROR_CHECK(esp_timer_create(&ta,&timer));ESP_ERROR_CHECK(esp_timer_start_periodic(timer,1000));
  lv_timer_handler();esp_err_t result=device_web_start();
  if(result!=ESP_OK){lv_label_set_text(title,"USB 后台启动失败");ESP_LOGE("main","init: %s",esp_err_to_name(result));}
- int pins[3]={39,38,37};uint8_t initial=0;for(int i=0;i<3;i++)if(!gpio_get_level(pins[i]))initial|=1<<i;buttons_init(&keys,initial,key,NULL);int64_t updated=0,led_updated=0;
+ int pins[3]={FMO_KEY_A,FMO_KEY_B,FMO_KEY_C};uint8_t initial=0;for(int i=0;i<3;i++)if(!gpio_get_level(pins[i]))initial|=1<<i;buttons_init(&keys,initial,key,NULL);int64_t updated=0,led_updated=0;
  while(1){int64_t now=esp_timer_get_time();uint8_t pressed=0;for(int i=0;i<3;i++)if(!gpio_get_level(pins[i]))pressed|=1<<i;if(result==ESP_OK){if(now-led_updated>=25000){voice_view_t led_voice;voice_view(&led_voice);side_leds_update(led_voice.tx,led_voice.rx,now/1000);unsigned brightness=display_idle_step(&display_idle,now/1000,led_voice.tx||led_voice.rx||pressed);ui_idle_seconds=(now/1000-display_idle.last_activity)/1000;ui_pressed_mask=pressed;if(brightness!=ui_backlight_percent){disp_driver_set_brightness(brightness);ui_backlight_percent=brightness;}led_updated=now;}buttons_step(&keys,pressed,now/1000,page==HOME);if(now-updated>150000){refresh();updated=now;}}lv_timer_handler();vTaskDelay(pdMS_TO_TICKS(10));}
 }

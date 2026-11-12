@@ -23,3 +23,8 @@ output/
 web-flasher/node_modules/
 web-flasher/public/app.js
 web-flasher/public/firmware/
+
+/build-xingzhi/
+/build-m5-regression/
+/ui-preview-firmware/sdkconfig.xingzhi
+/ui-preview-firmware/sdkconfig.xingzhi.old
