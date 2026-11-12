@@ -17,6 +17,14 @@ with tempfile.TemporaryDirectory() as td:
   err=lib.wire_validate_bundle(obj,key,call,clock);lib.cJSON_Delete(obj)
   assert (err is None)==expect,(name,err)
   print('PASS',name)
+ lib.wire_validate_root.argtypes=[C.c_void_p,C.c_int64];lib.wire_validate_root.restype=C.c_char_p
+ def check_root(value,expected=True,clock=now):
+  obj=lib.cJSON_Parse((value if isinstance(value,str) else json.dumps(value)).encode());err=lib.wire_validate_root(obj,clock);lib.cJSON_Delete(obj);assert (err is None)==expected,err
+ check_root(r);check_root(r,False,0);check_root(r,False,now+4000)
+ bad=copy.deepcopy(r);bad['subject']['name']='Tampered';check_root(bad,False)
+ bad=copy.deepcopy(r);bad['signature']='A'*86;check_root(bad,False)
+ check_root(i,False);check_root(json.dumps(r).replace('"type": "rootCA"','"type": "rootCA", "type": "rootCA"'),False)
+ print('PASS standalone root import validates signature, format, time and duplicates')
  check('valid chain',good);check('wrong device',good,False,key=bytes(32));check('wrong callsign',good,False,call=b'BI4TES');check('expired',good,False,clock=now+4000);check('not yet valid',good,False,clock=now-100);check('clock pending permits storage',good,clock=0)
  for name,path,value in [('tamper signature',['userCert','signature'],'A'*86),('issuer mismatch',['userCert','issuerSn'],5),('path length',['rootCert','extensions','pathLen'],0),('no CN',['intermediateCert','extensions','issuingCountries'],['US']),('fractional uid',['userCert','subject','uid'],1.5),('duplicate uid',['userCert','subject','uid'],1791)]:
   b=copy.deepcopy(good);target=b

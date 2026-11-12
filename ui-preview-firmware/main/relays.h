@@ -25,3 +25,6 @@ const char*relays_remove(int index,const relay_t*expected);
 const char*relays_update_name(const cJSON*j);
 
 void relays_use_temporary(const relay_t*relay);
+
+void relays_configure(int profile_id,const char*name,const uint8_t identity_hash[32]);
+const char*relays_profile_name(void);

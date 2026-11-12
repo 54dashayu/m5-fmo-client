@@ -63,6 +63,17 @@ int main(void){
  relay_t temp=r;temp.uid=999;relays_use_temporary(&temp);assert(relays_current(&r,NULL)==-1&&r.uid==999);fail_at=writes+1;assert(!relays_select(0));fail_at=-1;assert(relays_current(&r,NULL)==-1&&r.uid==999);assert(relays_select(0));assert(relays_current(&r,NULL)==0&&r.uid==2);
  // Committed index is authoritative; an orphan record is never displayed.
  assert(store_record(99,&temp));restart();assert(count==23);j=relays_json_page(999);assert(cJSON_GetObjectItemCaseSensitive(j,"offset")->valueint==16);cJSON_Delete(j);
+
+ // Each CA owns a snapshot and selection; proof is durable but tied to exact device certificate.
+ uint8_t ha[32]={1},hb[32]={2},replacement[32]={3};
+ relays_configure(1,"BH1JSS",ha);restart();int original=count;assert(relays_get(0,&r));relays_connection(&r,true);assert(relays_select(1));restart();assert(selected==1&&relays_verified(&r));
+ relays_configure(2,"BI4TES",hb);restart();assert(count==original&&!relays_verified(&r));assert(relays_select(2));assert(relays_get(0,&victim));assert(!relays_remove(0,&victim));j=make(8123);assert(!relays_add(j));cJSON_Delete(j);relays_connection(&r,false);restart();assert(selected==1&&count==original);
+ relays_configure(1,"BH1JSS",ha);restart();assert(count==original&&selected==1&&relays_verified(&r));assert(relays_get(0,&victim)&&victim.uid==r.uid);
+ relays_configure(1,"BH1JSS",replacement);restart();assert(!relays_verified(&r));
+ relays_configure(1,"BH1JSS",ha);restart();assert(relays_verified(&r));
+ // A failed proof write must never create durable evidence after reboot.
+ relays_configure(2,"BI4TES",hb);restart();assert(relays_get(0,&r));fail_at=writes+1;relays_connection(&r,true);fail_at=-1;restart();assert(!relays_verified(&r));
+ profile_id=0;strcpy(index_key,"index");memset(identity_hash,0,32);
  // Interrupted migration leaves legacy authoritative; retry succeeds.
  for(int k=0;k<256;k++){free(cells[k].data);memset(&cells[k],0,sizeof(cells[k]));}
  free(entries);entries=NULL;count=selected=0;

@@ -4770,4 +4770,3 @@ lv_font_t EN_BIG = {
     .line_height = 82,
     .base_line = 0,
 };
-

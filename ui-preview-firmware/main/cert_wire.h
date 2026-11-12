@@ -11,3 +11,5 @@ size_t wire_request_tbs(uint8_t *out,size_t cap,const char *call,const uint8_t p
 const char *wire_validate_bundle(const cJSON *bundle,const uint8_t own_pk[32],const char *own_call,int64_t now);
 size_t wire_cert_tbs(const cJSON *cert,uint8_t *out,size_t cap);
 size_t wire_login_tbs(uint8_t *out,size_t cap,int64_t server_uid,const char *server_call,const char *host,int port,const uint8_t server_fp[32],int64_t now,const uint8_t user_fp[32]);
+
+const char *wire_validate_root(const cJSON *root,int64_t now);

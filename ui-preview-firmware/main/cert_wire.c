@@ -28,6 +28,15 @@ size_t wire_cert_tbs(const cJSON*j,uint8_t*out,size_t cap){const char*kind=str(j
  else{jnum(&b,j,"sn");if(count==15){jtext(&b,i,"name");jtext(&b,i,"email");jtext(&b,s,"name");jpk(&b,s,"publicKey");}else{jnum(&b,i,"sn");jtext(&b,i,"name");jpk(&b,i,"publicKey");jtext(&b,s,"name");jtext(&b,s,"email");jpk(&b,s,"publicKey");}if(!cJSON_IsTrue(get(e,"isCA")))b.ok=false;byte(&b,0xf5);jnum(&b,e,"pathLen");if(count==20)jtext(&b,e,"keyId");jtext(&b,e,"crl");jtext(&b,e,"license");if(count==15)jtext(&b,e,"keyId");else{const cJSON*r=get(e,"uidRange");jnum(&b,r,"start");jnum(&b,r,"end");const cJSON*c=get(e,"issuingCountries");int n=cJSON_GetArraySize(c);if(!cJSON_IsArray(c)||n<1||n>32)b.ok=false;const char*cs[32];for(int x=0;x<n&&x<32;x++){const cJSON*v=cJSON_GetArrayItem(c,x);cs[x]=cJSON_IsString(v)?v->valuestring:"";if(strlen(cs[x])!=2||cs[x][0]<'A'||cs[x][0]>'Z'||cs[x][1]<'A'||cs[x][1]>'Z')b.ok=false;}if(n>32)return 0;for(int x=0;x<n;x++)for(int y=x+1;y<n;y++)if(strcmp(cs[x],cs[y])>0){const char*t=cs[x];cs[x]=cs[y];cs[y]=t;}head(&b,4,n);for(int x=0;x<n;x++)text(&b,cs[x]);}}
  jnum(&b,j,"iat");jnum(&b,j,"exp");return b.ok?b.n:0;}
 static bool verify(const cJSON*cert,const uint8_t pk[32],uint8_t*scratch){uint8_t sig[64];if(!eq(str(cert,"signatureAlgorithm"),"Ed25519")||!wire_unb64(str(cert,"signature"),sig,64))return false;size_t n=wire_cert_tbs(cert,scratch,4096);return n&&crypto_ed25519_check(sig,pk,scratch,n)==0;}
+const char *wire_validate_root(const cJSON*r,int64_t now){
+ if(!cJSON_IsObject(r)||!unique_keys(r)||!eq(str(r,"type"),"rootCA"))return "请选择 FMO JSON 根 CA 证书";
+ const cJSON*s=get(r,"subject"),*e=get(r,"extensions");uint8_t pub[32];int64_t sn,iat,exp,path;
+ const char*name=str(s,"name");if(!name||!name[0]||strlen(name)>96||!eq(name,str(get(r,"issuer"),"name"))||!wire_unb64(str(s,"publicKey"),pub,32))return "根证书名称或公钥无效";
+ if(!num(r,"sn",&sn)||!num(r,"iat",&iat)||!num(r,"exp",&exp)||!num(e,"pathLen",&path)||path!=1||!cJSON_IsTrue(get(e,"isCA"))||iat>=exp)return "根证书授权或有效期无效";
+ if(now<1700000000)return "请先联网校时，再导入根证书";
+ if(now<iat||now>=exp)return "根证书未生效或已过期";
+ uint8_t*scratch=malloc(4096);if(!scratch)return "可用内存不足";bool ok=verify(r,pub,scratch);free(scratch);return ok?NULL:"根证书自签名校验失败";
+}
 const char *wire_validate_bundle(const cJSON*b,const uint8_t own[32],const char*call,int64_t now){
  if(!cJSON_IsObject(b)||!unique_keys(b))return "JSON 格式不正确或包含重复字段";
  const cJSON*r=get(b,"rootCert"),*i=get(b,"intermediateCert"),*u=get(b,"userCert");if(!eq(str(r,"type"),"rootCA")||!eq(str(i,"type"),"intermediateCA")||!eq(str(u,"type"),"userCert"))return "需要 rootCert、intermediateCert、userCert 完整证书链";

@@ -1,7 +1,7 @@
 /*******************************************************************************
  * Size: 48 px
  * Bpp: 4
- * Opts: --font ui-preview-firmware/assets/fonts/NotoSansCJKsc-Bold.otf --size 48 --bpp 4 --format lvgl --no-compress --no-kerning --range 48-58 --lv-font-name ui_clock -o ui-preview-firmware/main/fonts/ui_clock.c
+ * Opts: --font /Users/bh1jss/Documents/ChatGPT/AI Passport项目/github-release/m5-fmo-client/ui-preview-firmware/assets/fonts/NotoSansCJKsc-Bold.otf --size 48 --bpp 4 --format lvgl --no-compress --no-kerning --range 48-58 --lv-font-name ui_clock -o /Users/bh1jss/Documents/ChatGPT/AI Passport项目/github-release/m5-fmo-client/ui-preview-firmware/main/fonts/ui_clock.c
  ******************************************************************************/
 
 #ifdef LV_LVGL_H_INCLUDE_SIMPLE

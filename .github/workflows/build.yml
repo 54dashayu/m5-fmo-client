@@ -36,6 +36,9 @@ jobs:
           path: .idf-test
           sparse-checkout: components/json
       - run: git -C .idf-test submodule update --init --depth 1 components/json/cJSON
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
       - run: pip install -r requirements.txt
       - run: python tools/run_tests.py
         env:

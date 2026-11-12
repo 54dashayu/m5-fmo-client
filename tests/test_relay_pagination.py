@@ -15,6 +15,7 @@ pre=r'''
 static int selection,current,count=8,chosen=-1,destination;
 static int sorted[8]={6,0,1,2,3,4,5,7};
 typedef struct{char name[65],call[8];}relay_t;
+static const char*relays_profile_name(void){return "BH1JSS M5";}
 static int relays_count(void){return count;}
 static int relays_order_at(int p){return p>=0&&p<count?sorted[p]:-1;}
 static int relays_order_position(int index){for(int i=0;i<count;i++)if(sorted[i]==index)return i;return count;}

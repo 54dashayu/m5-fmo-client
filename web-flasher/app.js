@@ -16,7 +16,7 @@ async function refreshVersion(){
  const r=await fetch('firmware/manifest.json?t='+Date.now(),{cache:'no-store',signal:AbortSignal.timeout(15000)});
  if(!r.ok)throw Error('HTTP '+r.status);
  const manifest=await r.json();
- if(!/^\d+\.\d+\.\d+(?:-dev)?$/.test(manifest.version)||!Array.isArray(manifest.parts)||manifest.parts.length!==3)throw Error('版本清单格式异常');
+ if(!/^\d+\.\d+\.\d+(?:-dev|-rc[1-9][0-9]*)?$/.test(manifest.version)||!Array.isArray(manifest.parts)||manifest.parts.length!==3)throw Error('版本清单格式异常');
  if(manifest.revision!==undefined&&!/^home-r[0-9]+$/.test(manifest.revision))throw Error('修订号格式异常');
  const directory='v'+manifest.version+(manifest.revision?'-'+manifest.revision:'');
  const names=['bootloader.bin','partition-table.bin','m5-fmo-client-v'+manifest.version+'-app.bin'];

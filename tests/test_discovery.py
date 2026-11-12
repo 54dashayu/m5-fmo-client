@@ -11,4 +11,16 @@ class Test(unittest.TestCase):
   for k,v in [('stationUrl','127.0.0.1'),('stationUrl','http://example.net'),('stationPort',True),('uid',0),('lastSeen','2020-01-01T00:00:00Z')]:self.assertEqual(self.runrows([{**x,k:v}]),[])
   self.assertEqual(len(self.runrows([x,x])),1)
   self.assertNotIn('lat',self.runrows([{**x,'lat':42}])[0])
+ def test_complete_browser_directory(self):
+  now=1794182400
+  rows=[{**self.row(),'uid':k+1,'stationName':'Node '+str(k)} for k in range(300)]
+  rows += [{**self.row(),'uid':1845,'stationName':'AI Passport','stationUrl':'','stationPort':None}, {**self.row(),'uid':9001,'lastSeen':'2020-01-01T00:00:00Z','stationName':'Historical node'}]
+  data=m.normalize({'identities':rows,'status':{'connected':True}},now)
+  self.assertEqual(len(data['servers']),300)
+  self.assertEqual(len(data['allServers']),302)
+  passport=next(r for r in data['allServers'] if r['uid']==1845)
+  self.assertFalse(passport['addable']);self.assertFalse(passport['sourceVerified'])
+  old=next(r for r in data['allServers'] if r['uid']==9001)
+  self.assertTrue(old['stale']);self.assertFalse(old['addable'])
+  self.assertNotIn('lat',passport)
 if __name__=='__main__':unittest.main()

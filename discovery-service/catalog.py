@@ -10,6 +10,27 @@ def stamp(value):
  try:return int(datetime.datetime.fromisoformat(re.sub(r'(\.\d{6})\d+',r'\1',str(value)).replace('Z','+00:00')).timestamp())
  except (ValueError,TypeError,OverflowError):return 0
 
+def browser_catalog(snapshot,now,validated):
+ """Display every server identity in the bounded source snapshot, even if stale
+ or incomplete. Display visibility never confers root trust or login rights."""
+ complete={(r['uid'],r['host'],r['port']):r for r in validated}
+ rows={}
+ def text(v,limit):
+  return ''.join(c for c in str(v or '') if ord(c)>=32)[:limit]
+ for item in snapshot['identities'][:5000]:
+  if not isinstance(item,dict) or not (item.get('stationName') or item.get('stationUrl')):continue
+  uid=item.get('uid')
+  if type(uid) is not int or not 0<uid<=4294967295:continue
+  host=text(item.get('stationUrl'),256).strip().lower();call=text(item.get('callsign'),32).upper()
+  port=item.get('stationPort');port=port if type(port) is int and 0<port<=65535 else 0
+  seen=stamp(item.get('lastSeen'));matched=complete.get((uid,host,port))
+  row=dict(name=text(item.get('stationName') or call or str(uid),256),callsign=call,uid=uid,host=host,port=port,lastSeen=seen,fingerprint='',sourceVerified=False,addable=False,stale=not 0<=now-seen<=86400)
+  if matched:
+   row.update(fingerprint=matched['fingerprint'],sourceVerified=matched['sourceVerified'])
+   row['addable']=bool(matched['fingerprint']) and bool(re.fullmatch(r'B[A-Z][0-9][A-Z]{1,3}',call)) and len(row['name'].encode())<=64
+  rows[(uid,call,host,port)]=row
+ return sorted(rows.values(),key=lambda r:(r['stale'],not r['sourceVerified'],-r['lastSeen'],r['uid']))
+
 def normalize(snapshot,now=None):
  now=int(time.time()) if now is None else now
  rows={}
@@ -37,8 +58,8 @@ def normalize(snapshot,now=None):
   name=''.join(c for c in name if ord(c)>=32)
   row=dict(name=name,callsign=call,uid=uid,host=host,port=port,fingerprint=fp if valid_fp else '',lastSeen=seen,sourceVerified=verified_source,source='BG5ESN APRS 广播汇总',status='source_verified' if verified_source else 'unverified')
   rows[(uid,host,port,fp)]=row
- result=sorted(rows.values(),key=lambda r:(not r['sourceVerified'],-r['lastSeen']))[:256]
- return dict(format='m5-discovery-v1',updatedAt=now,sourceUrl=SOURCE,sourceConnected=snapshot.get('status',{}).get('connected') is True,servers=result)
+ result=sorted(rows.values(),key=lambda r:(not r['sourceVerified'],-r['lastSeen']))
+ return dict(format='m5-discovery-v1',updatedAt=now,sourceUrl=SOURCE,sourceConnected=snapshot.get('status',{}).get('connected') is True,servers=result,allServers=browser_catalog(snapshot,now,result),sourceTruncated=len(snapshot['identities'])>5000)
 
 def fetch():
  with urllib.request.urlopen(SOURCE,timeout=20) as response:

@@ -101,6 +101,12 @@ void discovery_tick(void){static int64_t next_fetch=0,next_probe=0,idle_since=0;
 esp_err_t discovery_start(discovery_identity_fn fn,SemaphoreHandle_t shared){identity=fn;allocation_lock=shared;mutex=xSemaphoreCreateMutex();return mutex?ESP_OK:ESP_ERR_NO_MEM;}
 void discovery_status(char*out,size_t size){if(!mutex){snprintf(out,size,"等待联网后自动发现");return;}xSemaphoreTake(mutex,portMAX_DELAY);snprintf(out,size,"%s",message);xSemaphoreGive(mutex);}
 void discovery_refresh(void){atomic_store(&refresh,true);}
+void discovery_identity_changed(void){
+ atomic_store(&owner_valid,false);atomic_store(&refresh,true);if(!mutex)return;
+ xSemaphoreTake(mutex,portMAX_DELAY);owner[0]=0;checking_uid=0;
+ for(int i=0;i<count;i++)rows[i].verified=rows[i].attempted=0;
+ revision++;snprintf(message,sizeof(message),"身份已变更，空闲时刷新并重新验证");xSemaphoreGive(mutex);
+}
 int discovery_list(relay_t out[DISCOVERY_MAX],uint32_t*rev){if(!mutex)return 0;xSemaphoreTake(mutex,portMAX_DELAY);int n=0;if(atomic_load(&owner_valid))for(int i=0;i<count;i++)if(usable(&rows[i],time(NULL)))out[n++]=rows[i].relay;if(rev)*rev=revision;xSemaphoreGive(mutex);return n;}
 const char*discovery_select(int i,uint32_t rev){relay_t list[DISCOVERY_MAX];uint32_t current;int n=discovery_list(list,&current);if(voice_busy())return "通联中不能切换";char actual[65];if(!current_owner(actual))return "设备身份或网络尚未就绪";xSemaphoreTake(mutex,portMAX_DELAY);bool match=!strcmp(actual,owner);xSemaphoreGive(mutex);if(!match)return "身份已变化，请等待重新验证";if(rev!=current||i<0||i>=n)return "列表已更新，请重新选择";
  for(int k=0;k<relays_count();k++){relay_t r;if(!relays_get(k,&r))continue;if(same(&r,&list[i]))return relays_select(k)?NULL:"保存失败";}
