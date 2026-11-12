@@ -8,7 +8,7 @@
 
 ## 下载预编译版
 
-在 [GitHub Releases](https://github.com/54dashayu/m5-fmo-client/releases/latest) 下载 v0.7.26 的 `m5-fmo-client-v0.7.26.zip`，解压并核对 `SHA256SUMS`。包内是通用程序，不包含 Wi‑Fi、设备私钥或用户证书。
+在 [GitHub Releases](https://github.com/54dashayu/m5-fmo-client/releases/latest) 下载 v0.7.27 的 `m5-fmo-client-v0.7.27.zip`，解压并核对 `SHA256SUMS`。包内是通用程序，不包含 Wi‑Fi、设备私钥或用户证书。
 
 需安装 Python 和 esptool：
 
@@ -27,10 +27,10 @@ python -m esptool --help
 
 ```sh
 python -m esptool --chip esp32 --port PORT --baud 115200 write_flash \
-  0x10000 m5-fmo-client-v0.7.26-app.bin
+  0x10000 m5-fmo-client-v0.7.27-app.bin
 ```
 
-此方式保留 NVS 中的 Wi‑Fi、设备密钥、证书和设置。仅适用于已有兼容分区、应用起始地址为 `0x10000` 且空间至少 3 MB 的设备。刷写结束必须看到校验成功；中途断线应重新完成刷写。
+此方式保留 NVS 中的 Wi‑Fi、各体系根 CA、设备密钥、设备证书和设置。升级后保持原通联身份；无需重新申请，不要执行“更换使用者”。仅适用于已有兼容分区、应用起始地址为 `0x10000` 且空间至少 3 MB 的设备。刷写结束必须看到校验成功；中途断线应重新完成刷写。
 
 ### 首次安装 / 从其他固件迁移
 
@@ -41,7 +41,7 @@ python -m esptool --chip esp32 --port PORT --baud 115200 write_flash \
   --flash_mode dio --flash_freq 80m --flash_size 4MB \
   0x1000 bootloader.bin \
   0x8000 partition-table.bin \
-  0x10000 m5-fmo-client-v0.7.26-app.bin
+  0x10000 m5-fmo-client-v0.7.27-app.bin
 ```
 
 这使用 16 MB 硬件中的前 4 MB，不意味着硬件只有 4 MB。首次安装路径经过构建和分区检查；本次现有设备验收采用应用区升级，没有为了发布而清空实机做全新安装。
