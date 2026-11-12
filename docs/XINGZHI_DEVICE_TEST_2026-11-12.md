@@ -25,3 +25,17 @@
 修正版写入校验通过，USB 连续状态查询成功。设备报告 board=xingzhi-cube-1.54tft-wifi，version=0.7.29-s3.1，audioReady=true，dmaRateHz=7999，micRateHz=8000，outputErrors=0。这里的采样率是协议等效值；物理 I2S 麦克风 16kHz、扬声器 24kHz。未收到用户物理操作反馈，keyEvents=0，未播放测试音或进入麦克风测试，因此不能声明三键和声音验收通过。
 
 修正版应用 SHA256：0f7dabf80e987ea6c01ae12b977d32ca52675a499e3514035c597ff2b6d5503f。源码提交：1de48db5a591212f5abc4c5cdc0e6d179b5315e3。
+
+## 用户现场反馈
+
+用户确认 A/B/C 三键、菜单、扬声器测试、麦克风测试正常。配网后的网页访问待排查：USB 当前报告 apActive=true、online=false、ip 为空；本机至 192.168.4.1 的路由经过 utun4，不能用本机访问失败判断设备 HTTP 服务故障。
+
+## 配网与局域网管理验证
+
+用户随后确认已连接热点并完成配网，设备局域网 IP 为 192.168.31.184。本机直接请求 http://192.168.31.184/ 返回 HTTP 200，HTML 页面 66020 字节，局域网管理页面可达。此前热点页面打不开的问题已由用户重试后完成配网；具体原因未证实，不归因于固件或手机代理。三键、菜单、扬声器、麦克风为用户现场确认通过；FMO 身份申请和双向通联尚未验收。
+
+## M5 体系证书与双向通联验收
+
+用户确认：小智与旁边 M5 已完成双向语音实测，两端声音均正常。USB 当前状态证实小智 0.7.29-s3.1 使用 bh1jss 证书体系，hasCertificate=true、certificateValid=true、mqttOnline=true。状态快照：rxPackets=170、txPackets=123、decodedFrames=354、decodeErrors=0、outputErrors=0、micPeak=11274。计数只证明本机处理情况，双端实际可闻结论来自用户现场反馈。未重复签发或替换现有证书，未操作 M5 固件。
+
+结论：本台 Xingzhi 1.54 寸 S3 R8N16 的三键、菜单、扬声器、麦克风、配网、局域网管理及 M5 体系双向通联基础验收通过。尚未涵盖其他 CA 体系、长时间稳定性、背光省电边界及断电后的证书/联网恢复。
