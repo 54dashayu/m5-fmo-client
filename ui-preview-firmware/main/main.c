@@ -77,7 +77,7 @@ static relay_t discovered_ui[DISCOVERY_MAX];static int discovered_count;static u
 static bool idle_started=false,was_active=false,show_clock=false;
 static int64_t idle_since;
 static char held_call[16];
-static const char*items[]={"选择中继","音量与静音","设备身份","网页管理","扬声器测试","麦克风测试","显示与按键","按键分配方案","屏幕休眠","返回通联"};
+static const char*items[]={"选择中继","音量与静音","设备身份","网页管理","扬声器测试","麦克风测试","显示与按键","按键分配方案","返回通联"};
 static void set_text(lv_obj_t*o,const char*s){
  char mapped[256];snprintf(mapped,sizeof(mapped),"%s",s);
  // Existing UI hints describe logical A/B/C roles, translate to physical keys.
@@ -198,7 +198,7 @@ static void key(int k,key_action_t action,void*ctx){(void)ctx;ui_key_events++;ui
  if(action==KEY_LONG){if(page==HOME){if(k==0)go(RELAYS);if(k==1)voice_ptt(false);if(k==2)go(MENU);}else if(k==0)go(HOME);return;}
  if(action!=KEY_SHORT)return;
  if(page==HOME){if(k==0)voice_volume(-5);if(k==1&&ptt_latch)voice_toggle_ptt();if(k==2)voice_volume(5);return;}
- if(page==MENU){if(k==0)selection=(selection+9)%10;if(k==2)selection=(selection+1)%10;if(k==1){int target=selection;if(target==0)go(RELAYS);else if(target==1)go(VOLUME);else if(target==2)go(IDENTITY);else if(target==3)go(WEB);else if(target==4)voice_tone();else if(target==5)go(MIC);else if(target==6)go(SETTINGS);else if(target==7)go(KEY_LAYOUT);else if(target==8){go(HOME);screen_sleep_enter(&screen_sleep);buttons_block(&keys);}else go(HOME);}return;}
+ if(page==MENU){if(k==0)selection=(selection+8)%9;if(k==2)selection=(selection+1)%9;if(k==1){int target=selection;if(target==0)go(RELAYS);else if(target==1)go(VOLUME);else if(target==2)go(IDENTITY);else if(target==3)go(WEB);else if(target==4)voice_tone();else if(target==5)go(MIC);else if(target==6)go(SETTINGS);else if(target==7)go(KEY_LAYOUT);else go(HOME);}return;}
  if(page==SETTINGS){
  if(k==0){selection=(selection+2)%3;}if(k==2)selection=(selection+1)%3;
  if(k==1){voice_ptt(false);if(selection==0){if(save_settings((rotation+1)%4,breathing,ptt_latch)){lv_disp_set_rotation(NULL,(lv_disp_rot_t)rotation);create_ui();}}
@@ -226,7 +226,7 @@ static void refresh(void){
  lv_obj_set_pos(footer,12,220);lv_obj_set_style_text_font(footer,&status_font,0);lv_obj_set_style_text_color(footer,lv_color_hex(0x70d5ae),0);lv_label_set_text(footer,"长按 A 返回       B 确认");
  if(page==HOME){
   refresh_home(&v,&a,&relay);
- }else if(page==MENU){lv_label_set_text_fmt(title,"设备菜单  %d/2",selection/5+1);for(int i=0;i<5;i++){int n=(selection/5)*5+i;if(n<10)lv_label_set_text_fmt(lines[i],"%s %s",n==selection?">":" ",items[n]);else lv_label_set_text(lines[i],"");}lv_label_set_text(footer,"A 上项  B 确认  C 下项 / 长按A返回");
+ }else if(page==MENU){lv_label_set_text_fmt(title,"设备菜单  %d/2",selection/5+1);for(int i=0;i<5;i++){int n=(selection/5)*5+i;if(n<9)lv_label_set_text_fmt(lines[i],"%s %s",n==selection?">":" ",items[n]);else lv_label_set_text(lines[i],"");}lv_label_set_text(footer,"A 上项  B 确认  C 下项 / 长按A返回");
  }else if(page==RELAYS){int n=relays_count();if(selection>=n)selection=current<n?current:-1;int pos=relays_order_position(selection);int total=n+1,start=pos/4*4;lv_label_set_text_fmt(title,"选择中继 %d/%d",pos/4+1,(total+3)/4);for(int i=0;i<4;i++){int p=start+i;lv_obj_set_style_text_color(lines[i],lv_color_hex(p==n?0xffc567:0xecf2f8),0);if(p>=total)lv_label_set_text(lines[i],"");else if(p==n)lv_label_set_text_fmt(lines[i],"%s + 发现中继",selection<0?">":" ");else{int index=relays_order_at(p);relay_t r={0};if(!relays_get(index,&r)){lv_label_set_text(lines[i],"");continue;}char name[65];name_for_display(name,sizeof(name),r.name[0]?r.name:r.call,relay_glyph);lv_label_set_text_fmt(lines[i],"%s %s%s / %s",selection==index?">":" ",current==index?"[当前] ":"",name,r.call);}}lv_label_set_text_fmt(lines[4],"体系：%s",relays_profile_name());lv_label_set_text(footer,"A 上项  B 确认  C 下项 / 长按A返回");
  }else if(page==DISCOVER){relay_t fresh[DISCOVERY_MAX];uint32_t rev;int num=discovery_list(fresh,&rev);if(rev!=discovered_revision||num!=discovered_count){relay_t old={0};bool was_refresh=selection==discovered_count;if(selection<discovered_count)old=discovered_ui[selection];memcpy(discovered_ui,fresh,num*sizeof(relay_t));discovered_count=num;discovered_revision=rev;discovery_notice[0]=0;selection=was_refresh?num:0;for(int i=0;!was_refresh&&i<num;i++)if(fresh[i].uid==old.uid&&!strcmp(fresh[i].fingerprint,old.fingerprint))selection=i;}int total=discovered_count+1,start=selection/4*4;lv_label_set_text_fmt(title,"发现中继 %d/%d",selection/4+1,(total+3)/4);for(int i=0;i<4;i++){int p=start+i;if(p>=total)lv_label_set_text(lines[i],"");else if(p==discovered_count)lv_label_set_text_fmt(lines[i],"%s 刷新列表",selection==p?">":" ");else{char name[65];name_for_display(name,sizeof(name),discovered_ui[p].name,relay_glyph);lv_label_set_text_fmt(lines[i],"%s %s",selection==p?">":" ",name);}}char progress[96];discovery_status(progress,sizeof(progress));lv_label_set_text(lines[4],discovery_notice[0]?discovery_notice:progress);lv_label_set_text(footer,"A 上项  B 选择  C 下项 / 长按A返回");
  }else if(page==KEY_LAYOUT){lv_label_set_text_fmt(title,"按键方案 %d/6",selection+1);
