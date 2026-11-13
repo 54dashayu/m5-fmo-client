@@ -11,6 +11,7 @@
 #ifndef SSTV_HOST_TEST
 #include "esp_spiffs.h"
 #include "esp_partition.h"
+#include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 static SemaphoreHandle_t mutex;
@@ -20,6 +21,10 @@ static void give(void){xSemaphoreGive(mutex);}
 #else
 static bool take(void){return true;}static void give(void){}
 #endif
+static bool needs_initialization;
+bool sstv_store_needs_initialization(void){return needs_initialization;}
+// All users hold the store mutex; keep the album index off task stacks.
+static sstv_entry_t entry_scratch[SSTV_GALLERY_MAX];
 static char directory[256];static const char *error="相册尚未初始化";
 static const char *save_error="保存失败：相册已满或存储忙";
 const char *sstv_store_save_error(void){return save_error;}
@@ -40,7 +45,7 @@ static bool header(FILE*f,uint8_t h[24]){if(fread(h,1,24,f)!=24)return false;
 const char *sstv_store_error(void){return error;}
 const char *sstv_store_init(const char *path){
 #ifndef SSTV_HOST_TEST
-    (void)path;mutex=xSemaphoreCreateMutex();if(!mutex)return error="相册内存不足";
+    (void)path;needs_initialization=false;if(!mutex)mutex=xSemaphoreCreateMutex();if(!mutex)return error="相册内存不足";
     const esp_partition_t*p=esp_partition_find_first(ESP_PARTITION_TYPE_DATA,ESP_PARTITION_SUBTYPE_DATA_SPIFFS,"spiffs");
 #ifdef FMO_SSTV_STREAMING
     const esp_partition_t*extra=esp_partition_find_first(ESP_PARTITION_TYPE_DATA,ESP_PARTITION_SUBTYPE_DATA_SPIFFS,"sstv");
@@ -48,14 +53,23 @@ const char *sstv_store_init(const char *path){
 #endif
     if(!p)return error="缺少相册分区，请按升级说明安装";
     esp_vfs_spiffs_conf_t conf={.base_path="/sstv",.partition_label=partition_label,.max_files=3,.format_if_mount_failed=false};
-    if(esp_vfs_spiffs_register(&conf)!=ESP_OK){
+    esp_err_t mounted=esp_vfs_spiffs_register(&conf);
+    if(mounted!=ESP_OK){
+        ESP_LOGE("sstv_store","mount %s offset=0x%lx size=0x%lx error=%s",partition_label,(unsigned long)p->address,(unsigned long)p->size,esp_err_to_name(mounted));
+        if(mounted==ESP_ERR_NO_MEM)return error="相册内存不足，请重启重试";
+        if(mounted!=ESP_FAIL)return error="相册挂载失败，请重启检查";
         /* Never auto-format existing or corrupt data. Only a wholly erased partition. */
         uint8_t block[512];bool blank=true;
         for(size_t off=0;off<p->size&&blank;off+=sizeof(block)){
-            if(esp_partition_read(p,off,block,sizeof(block))!=ESP_OK){blank=false;break;}
+            if(esp_partition_read(p,off,block,sizeof(block))!=ESP_OK)return error="相册读取失败，请检查存储";
             for(unsigned k=0;k<sizeof(block);k++)if(block[k]!=255){blank=false;break;}
         }
-        if(!blank)return error="相册分区含已有数据，未格式化";
+        if(!blank){
+#ifdef FMO_SSTV_STREAMING
+            needs_initialization=!strcmp(partition_label,"sstv")&&p->address==0x400000&&p->size==0x400000;
+#endif
+            return error="相册未就绪，请到网页相册处理";
+        }
         if(esp_spiffs_format(partition_label)!=ESP_OK||esp_vfs_spiffs_register(&conf)!=ESP_OK)return error="相册分区初始化失败";
     }
     path="/sstv";
@@ -64,6 +78,21 @@ const char *sstv_store_init(const char *path){
     snprintf(directory,sizeof(directory),"%s",path);DIR*d=opendir(directory);if(!d)return error="相册存储不可用";closedir(d);
     char tmp[300];snprintf(tmp,sizeof(tmp),"%s/fmo-sstv-pending.tmp",directory);unlink(tmp);error=NULL;return NULL;
 }
+
+const char *sstv_store_initialize_confirmed(void){
+#if !defined(SSTV_HOST_TEST) && defined(FMO_SSTV_STREAMING)
+ if(!needs_initialization||!error)return "相册不需要初始化";
+ const esp_partition_t*p=esp_partition_find_first(ESP_PARTITION_TYPE_DATA,ESP_PARTITION_SUBTYPE_DATA_SPIFFS,"sstv");
+ if(!p||p->address!=0x400000||p->size!=0x400000||strcmp(partition_label,"sstv"))return "相册分区不匹配，未修改";
+ if(!take())return "相册忙，请稍后重试";
+ esp_err_t e=esp_spiffs_format("sstv");give();
+ if(e!=ESP_OK)return "相册初始化失败，请重启检查";
+ return sstv_store_init(NULL);
+#else
+ return "本设备不支持此初始化操作";
+#endif
+}
+
 static int list(sstv_entry_t*out){
     DIR*d=opendir(directory);if(!d)return -1;int count=0;struct dirent*e;
     while((e=readdir(d))){unsigned id;int end=0;if(sscanf(e->d_name,"fmo-sstv-%8x.bin%n",&id,&end)!=1||end!=21||e->d_name[end]||!id)continue;
@@ -95,11 +124,11 @@ static bool storage_stats(sstv_storage_t*out,const sstv_entry_t*entries,int n){
  if(out->remaining>SSTV_GALLERY_MAX-out->count)out->remaining=SSTV_GALLERY_MAX-out->count;
  out->low=out->remaining<=2;return true;
 }
-bool sstv_store_stats(sstv_storage_t*out){if(error||!out||!take())return false;sstv_entry_t entries[SSTV_GALLERY_MAX];int n=list(entries);bool ok=storage_stats(out,entries,n);give();return ok;}
+bool sstv_store_stats(sstv_storage_t*out){if(error||!out||!take())return false;sstv_entry_t *entries=entry_scratch;int n=list(entries);bool ok=storage_stats(out,entries,n);give();return ok;}
 static bool save_frame(const uint8_t*p,uint32_t at,uint32_t*id,const char*relay,unsigned partial_lines){
     (void)relay;(void)partial_lines;
     if(error||!p||!id||!take())return false;
-    sstv_entry_t entries[SSTV_GALLERY_MAX];int n=list(entries);bool ok=false;uint8_t*encoded=NULL;const uint8_t*payload=p;size_t payload_size=SSTV_BYTES;save_error="保存失败：相册已满或存储忙";
+    sstv_entry_t *entries=entry_scratch;int n=list(entries);bool ok=false;uint8_t*encoded=NULL;const uint8_t*payload=p;size_t payload_size=SSTV_BYTES;save_error="保存失败：相册已满或存储忙";
     if(n<0||n>=SSTV_GALLERY_MAX)goto done;
 #ifdef SSTV_JPEG_STORAGE
     if(!sstv_jpeg_encode(p,&encoded,&payload_size)){save_error="图片压缩失败，请稍后保存";goto done;}payload=encoded;

@@ -10,7 +10,7 @@ static void discard_locked(void){if(stream_file)fclose(stream_file);stream_file=
 void sstv_stream_discard(void){if(error||!take())return;discard_locked();stream_prepared=false;give();}
 bool sstv_stream_prepare(void){
  if(error||!take())return false;
- sstv_entry_t entries[SSTV_GALLERY_MAX];int n=list(entries);sstv_storage_t space;
+ sstv_entry_t *entries=entry_scratch;int n=list(entries);sstv_storage_t space;
  bool ok=storage_stats(&space,entries,n)&&n<SSTV_GALLERY_MAX&&space.used+SSTV_BYTES*5/4+4096<=space.safe_limit;
  if(ok){stream_id=n?entries[0].id+1:1;ok=stream_id!=0;}
  stream_prepared=ok;if(!ok)save_error="相册空间不足，请先导出并删除旧图";give();return ok;

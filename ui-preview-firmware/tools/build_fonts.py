@@ -3,7 +3,7 @@
 from pathlib import Path
 import json,re,subprocess,hashlib
 root=Path(__file__).resolve().parents[1]
-source='\n'.join(f.read_text() for f in [*(root/'main').glob('*.c'),*(root/'main').rglob('*.inc')])
+source='\n'.join(f.read_text() for f in [*(root/'main').glob('*.c'),*(root/'main').glob('*.h'),*(root/'main').rglob('*.inc')])
 points=sorted(set(range(32,127)) | {ord(c) for s in re.findall(r'"(?:\\.|[^"\\])*"',source) for c in s if ord(c)>127})
 font=root/'assets/fonts/NotoSansCJKsc-Bold.otf'
 ranges=','.join(str(p) for p in points)

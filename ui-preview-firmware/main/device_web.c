@@ -299,7 +299,14 @@ static void enrollment_tick(void){
    else if(state&&!strcmp(state,"ready")){cJSON*b=cJSON_GetObjectItemCaseSensitive(j,"bundle");const char*rootkey=js(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(b,"rootCert"),"subject"),"publicKey");const char*error=NULL;
     if(!rootkey||strcmp(rootkey,bi4tes?"QJGn93YtVCiU6klgM_fynYJ5s228OoILw77HSTLTeyc":"5y6IrwX4_Ju5vgdgKHOVrxeseLqlpjIorugzCvcpE0c"))error="签发根不匹配，拒绝自动安装";
     else if(time(NULL)<1700000000)error="证书可领取，等待网络校时后安装";
-    else {error=enroll_store_ready(selected,job,b);if(!error)snprintf(enrollment,sizeof(enrollment),"证书已就绪，请手动切换使用；当前通联不变");}
+    else {error=enroll_store_ready(selected,job,b);if(!error){
+     uint8_t activate=0;
+     if(nvs_get_u8(nv,"profile_next",&activate)==ESP_OK&&activate==selected+1){
+      identity_restart_pending=true;
+      bool queued=xTaskCreate(identity_restart_task,"cert_activate",2048,NULL,4,NULL)==pdPASS;
+      snprintf(enrollment,sizeof(enrollment),"%s",queued?"证书已自动启用，即将重启接入":"证书已自动启用，请重启设备");
+     }else snprintf(enrollment,sizeof(enrollment),"证书已自动启用，可按服务器选择；当前身份保留");
+    }}
     if(error)snprintf(enrollment,sizeof(enrollment),"%s",error);
    }else snprintf(enrollment,sizeof(enrollment),"领取状态异常，将自动重试");cJSON_Delete(j);}
  }
@@ -357,9 +364,19 @@ if(cJSON_IsNumber(i)&&i->valuedouble==i->valueint&&cJSON_IsNumber(u)&&u->valuedo
 #ifdef FMO_SSTV_STREAMING
 static bool gallery_chunk(void *ctx,const uint8_t *p,size_t n){return httpd_resp_send_chunk(ctx,(const char*)p,n)==ESP_OK;}
 #endif
+static esp_err_t gallery_initialize(request_t*r){
+ if(!auth(r))return ESP_OK;
+ cJSON*j=body(r);const char*confirm=js(j,"confirm");bool confirmed=confirm&&!strcmp(confirm,"ERASE_SSTV_ALBUM");cJSON_Delete(j);
+ if(!confirmed)return fail(r,"请先确认清空相册区域");
+ if(voice_busy()||sstv_rx_active())return fail(r,"请退出 SSTV 接收并结束通联后重试");
+ const char*e=sstv_store_initialize_confirmed();return e?fail(r,e):success(r,"相册已初始化，可以重新进入 SSTV 接收");
+}
 static esp_err_t gallery_page(request_t*r,const char*op){
  if(!auth(r))return ESP_OK;
- const char*error=sstv_store_error();if(error)return fail(r,error);
+ const char*error=sstv_store_error();if(error){
+  if(!strcmp(op,"gallery")){cJSON*j=cJSON_CreateObject();cJSON_AddArrayToObject(j,"images");cJSON_AddStringToObject(j,"storageError",error);cJSON_AddBoolToObject(j,"needsInitialization",sstv_store_needs_initialization());return response(r,j);}
+  return fail(r,error);
+ }
  if(!strcmp(op,"gallery")){
   sstv_entry_t entries[SSTV_GALLERY_MAX];int n=sstv_store_list(entries);if(n<0)return fail(r,"相册忙，请稍后重试");
   cJSON*j=cJSON_CreateObject(),*a=cJSON_AddArrayToObject(j,"images");cJSON_AddNumberToObject(j,"capacity",SSTV_GALLERY_MAX);
@@ -452,6 +469,7 @@ static esp_err_t dispatch(request_t*r,const char*op){
   return response(r,j);
  }
 #endif
+ if(!strcmp(op,"gallery_initialize"))return gallery_initialize(r);
  if(!strcmp(op,"gallery")||!strcmp(op,"gallery_image")||!strcmp(op,"gallery_delete"))return gallery_page(r,op);
  if(!strcmp(op,"discovery")){if(!auth(r))return ESP_OK;return response(r,discovery_json());}
  if(!strcmp(op,"discovery_refresh")){if(!auth(r))return ESP_OK;discovery_refresh();nvs_erase_key(nv,"relay_notice");nvs_commit(nv);return success(r,"已安排刷新，空闲时按当前身份重新验证接入");}
@@ -534,7 +552,7 @@ static esp_err_t network_start(void){
  ESP_RETURN_ON_ERROR(esp_wifi_set_protocol(WIFI_IF_STA,WIFI_PROTOCOL_11B|WIFI_PROTOCOL_11G|WIFI_PROTOCOL_11N),TAG,"Wi-Fi bgn protocol");
  ESP_RETURN_ON_ERROR(esp_event_handler_register(WIFI_EVENT,ESP_EVENT_ANY_ID,wifi_event,NULL),TAG,"event");ESP_RETURN_ON_ERROR(esp_event_handler_register(IP_EVENT,IP_EVENT_STA_GOT_IP,wifi_event,NULL),TAG,"event");ESP_RETURN_ON_ERROR(esp_wifi_start(),TAG,"start");ESP_RETURN_ON_ERROR(esp_wifi_set_ps(WIFI_PS_NONE),TAG,"power save");
  
- httpd_config_t h=HTTPD_DEFAULT_CONFIG();h.stack_size=14336;h.max_req_hdr_len=1536;h.max_uri_handlers=38;h.max_open_sockets=4;h.lru_purge_enable=true;h.recv_wait_timeout=3;h.send_wait_timeout=5;httpd_handle_t server;ESP_RETURN_ON_ERROR(httpd_start(&server,&h),TAG,"http");
+ httpd_config_t h=HTTPD_DEFAULT_CONFIG();h.stack_size=14336;h.max_req_hdr_len=1536;h.max_uri_handlers=39;h.max_open_sockets=4;h.lru_purge_enable=true;h.recv_wait_timeout=3;h.send_wait_timeout=5;httpd_handle_t server;ESP_RETURN_ON_ERROR(httpd_start(&server,&h),TAG,"http");
  const httpd_uri_t routes[]={
 #ifdef CONFIG_FMO_BOARD_XINGZHI
  {.uri="/api/gallery/upload",.method=HTTP_POST,.handler=gallery_wall_http},
@@ -542,7 +560,7 @@ static esp_err_t network_start(void){
  {.uri="/api/gallery/wall/status",.method=HTTP_GET,.handler=http_api,.user_ctx="sstv_wall_probe"},
  {.uri="/api/sstv/status",.method=HTTP_GET,.handler=http_api,.user_ctx="sstv_status"},
 #endif
- {.uri="/api/gallery",.method=HTTP_GET,.handler=http_api,.user_ctx="gallery"}, {.uri="/api/gallery/image",.method=HTTP_POST,.handler=http_api,.user_ctx="gallery_image"}, {.uri="/api/gallery/delete",.method=HTTP_POST,.handler=http_api,.user_ctx="gallery_delete"}, {.uri="/api/roots",.method=HTTP_POST,.handler=http_api,.user_ctx="roots"}, {.uri="/api/relays/page",.method=HTTP_POST,.handler=http_api,.user_ctx="relays_paged"}, {.uri="/api/discovery/add",.method=HTTP_POST,.handler=http_api,.user_ctx="discovery_add"}, {.uri="/api/discovery",.method=HTTP_GET,.handler=http_api,.user_ctx="discovery"},{.uri="/api/discovery/refresh",.method=HTTP_POST,.handler=http_api,.user_ctx="discovery_refresh"},{.uri="/api/discovery/select",.method=HTTP_POST,.handler=http_api,.user_ctx="discovery_select"}, {.uri="/api/logout",.method=HTTP_POST,.handler=http_api,.user_ctx="logout"}, {.uri="/api/relay/name",.method=HTTP_POST,.handler=http_api,.user_ctx="relay_name"}, {.uri="/api/relay/delete",.method=HTTP_POST,.handler=http_api,.user_ctx="relay_delete"}, {.uri="/api/identity/reset",.method=HTTP_POST,.handler=http_api,.user_ctx="identity_reset"}, {.uri="/api/certificate/rollback",.method=HTTP_POST,.handler=http_api,.user_ctx="rollback"}, {.uri="/api/scan",.method=HTTP_POST,.handler=http_api,.user_ctx="scan"}, {.uri="/api/networks",.method=HTTP_GET,.handler=http_api,.user_ctx="networks"}, {.uri="/api/network/connect",.method=HTTP_POST,.handler=http_api,.user_ctx="network_connect"}, {.uri="/api/network/delete",.method=HTTP_POST,.handler=http_api,.user_ctx="network_delete"}, {.uri="/api/relays",.method=HTTP_GET,.handler=http_api,.user_ctx="relays"}, {.uri="/api/relays",.method=HTTP_POST,.handler=http_api,.user_ctx="relay_add"}, {.uri="/api/relay/select",.method=HTTP_POST,.handler=http_api,.user_ctx="relay_select"}, {.uri="/api/reconnect",.method=HTTP_POST,.handler=http_api,.user_ctx="reconnect"}, {.uri="/",.method=HTTP_GET,.handler=index_page}, {.uri="/api/transport",.method=HTTP_GET,.handler=http_transport}, {.uri="/api/login",.method=HTTP_POST,.handler=http_api,.user_ctx="login"}, {.uri="/api/status",.method=HTTP_GET,.handler=http_api,.user_ctx="status"}, {.uri="/api/wifi",.method=HTTP_POST,.handler=http_api,.user_ctx="wifi"}, {.uri="/api/request",.method=HTTP_POST,.handler=http_api,.user_ctx="request"}, {.uri="/api/certificate",.method=HTTP_POST,.handler=http_api,.user_ctx="certificate"}, {.uri="/api/certificate",.method=HTTP_DELETE,.handler=http_api,.user_ctx="delete"}};
+ {.uri="/api/gallery/initialize",.method=HTTP_POST,.handler=http_api,.user_ctx="gallery_initialize"}, {.uri="/api/gallery",.method=HTTP_GET,.handler=http_api,.user_ctx="gallery"}, {.uri="/api/gallery/image",.method=HTTP_POST,.handler=http_api,.user_ctx="gallery_image"}, {.uri="/api/gallery/delete",.method=HTTP_POST,.handler=http_api,.user_ctx="gallery_delete"}, {.uri="/api/roots",.method=HTTP_POST,.handler=http_api,.user_ctx="roots"}, {.uri="/api/relays/page",.method=HTTP_POST,.handler=http_api,.user_ctx="relays_paged"}, {.uri="/api/discovery/add",.method=HTTP_POST,.handler=http_api,.user_ctx="discovery_add"}, {.uri="/api/discovery",.method=HTTP_GET,.handler=http_api,.user_ctx="discovery"},{.uri="/api/discovery/refresh",.method=HTTP_POST,.handler=http_api,.user_ctx="discovery_refresh"},{.uri="/api/discovery/select",.method=HTTP_POST,.handler=http_api,.user_ctx="discovery_select"}, {.uri="/api/logout",.method=HTTP_POST,.handler=http_api,.user_ctx="logout"}, {.uri="/api/relay/name",.method=HTTP_POST,.handler=http_api,.user_ctx="relay_name"}, {.uri="/api/relay/delete",.method=HTTP_POST,.handler=http_api,.user_ctx="relay_delete"}, {.uri="/api/identity/reset",.method=HTTP_POST,.handler=http_api,.user_ctx="identity_reset"}, {.uri="/api/certificate/rollback",.method=HTTP_POST,.handler=http_api,.user_ctx="rollback"}, {.uri="/api/scan",.method=HTTP_POST,.handler=http_api,.user_ctx="scan"}, {.uri="/api/networks",.method=HTTP_GET,.handler=http_api,.user_ctx="networks"}, {.uri="/api/network/connect",.method=HTTP_POST,.handler=http_api,.user_ctx="network_connect"}, {.uri="/api/network/delete",.method=HTTP_POST,.handler=http_api,.user_ctx="network_delete"}, {.uri="/api/relays",.method=HTTP_GET,.handler=http_api,.user_ctx="relays"}, {.uri="/api/relays",.method=HTTP_POST,.handler=http_api,.user_ctx="relay_add"}, {.uri="/api/relay/select",.method=HTTP_POST,.handler=http_api,.user_ctx="relay_select"}, {.uri="/api/reconnect",.method=HTTP_POST,.handler=http_api,.user_ctx="reconnect"}, {.uri="/",.method=HTTP_GET,.handler=index_page}, {.uri="/api/transport",.method=HTTP_GET,.handler=http_transport}, {.uri="/api/login",.method=HTTP_POST,.handler=http_api,.user_ctx="login"}, {.uri="/api/status",.method=HTTP_GET,.handler=http_api,.user_ctx="status"}, {.uri="/api/wifi",.method=HTTP_POST,.handler=http_api,.user_ctx="wifi"}, {.uri="/api/request",.method=HTTP_POST,.handler=http_api,.user_ctx="request"}, {.uri="/api/certificate",.method=HTTP_POST,.handler=http_api,.user_ctx="certificate"}, {.uri="/api/certificate",.method=HTTP_DELETE,.handler=http_api,.user_ctx="delete"}};
  for(unsigned i=0;i<sizeof(routes)/sizeof(routes[0]);i++)ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server,&routes[i]),TAG,"route");
  ESP_LOGI(TAG,"STA network and HTTP initialized");return ESP_OK;
 }

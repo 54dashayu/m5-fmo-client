@@ -85,6 +85,7 @@ static sstv_status_t sstv_status;
 static unsigned sstv_lines,sstv_generation;
 static uint32_t sstv_saved;
 static char image_notice[112];
+static bool sstv_start_failed;
 static sstv_entry_t gallery_entries[SSTV_GALLERY_MAX];
 static int gallery_count;
 #ifdef FMO_FULL_SSTV
@@ -375,7 +376,7 @@ static void go(int next){if(page==SSTV
 #ifdef FMO_FULL_SSTV
  relay_t rx_relay={0};char context[128]="";relays_current(&rx_relay,NULL);if(rx_relay.uid)snprintf(context,sizeof(context),"%s / %lu",rx_relay.name[0]?rx_relay.name:rx_relay.call,(unsigned long)rx_relay.uid);sstv_rx_relay(context);
 #endif
- sstv_saved=0;image_notice[0]=0;sstv_status=SSTV_WAITING;sstv_lines=0;sstv_generation=~0u;if(!sstv_rx_enable(true))snprintf(image_notice,sizeof(image_notice),"%s",sstv_store_error()?sstv_store_error():sstv_store_save_error());ensure_image();}
+ sstv_saved=0;image_notice[0]=0;sstv_status=SSTV_WAITING;sstv_lines=0;sstv_generation=~0u;if((sstv_start_failed=!sstv_rx_enable(true)))snprintf(image_notice,sizeof(image_notice),"%s",sstv_store_error()?sstv_store_error():sstv_store_save_error());ensure_image();}
  if(next==RESOURCES)gallery_space_valid=sstv_store_stats(&gallery_space);
  if(next==GALLERY){sstv_rx_init();ensure_image();selection=0;gallery_count=sstv_store_list(gallery_entries);gallery_load();}
  device_management_ap(next==WEB);selection=0;buttons_block(&keys);if(next==RELAYS)selection=relays_current(NULL,NULL);if(next==CA_CONFIRM)ca_submitted=false;if(next==KEY_LAYOUT)selection=ui_key_layout;if(next==MIC)voice_mic_test(true);if(next==IDENTITY||next==CA_LIST)load_ca_profiles();if(next==DISCOVER){discovered_count=discovery_list(discovered_ui,&discovered_revision);discovery_refresh();discovery_notice[0]=0;}}
@@ -451,11 +452,12 @@ static void refresh(void){
  }else if(page==SSTV){
   lv_label_set_text(title,"SSTV / Robot36");lv_label_set_text_fmt(brand,"当前中继：%s / %lu",relay.call,(unsigned long)relay.uid);
   unsigned before=sstv_generation;
-  if(sstv_rx_snapshot(&sstv_status,&sstv_lines,&sstv_generation)){
+  if(!sstv_start_failed&&sstv_rx_snapshot(&sstv_status,&sstv_lines,&sstv_generation)){
    ensure_image();if(sstv_image)lv_obj_clear_flag(sstv_image,LV_OBJ_FLAG_HIDDEN);
    if(before!=sstv_generation||sstv_status==SSTV_RECEIVING||sstv_status==SSTV_COMPLETE){image_changed();if(!sstv_saved)image_notice[0]=0;}
   }
-  if(image_notice[0])lv_label_set_text(lines[0],image_notice);
+  if(sstv_start_failed)lv_label_set_text(lines[0],sstv_store_error()?"相册未就绪，请在网页处理":image_notice);
+  else if(image_notice[0])lv_label_set_text(lines[0],image_notice);
 #ifdef FMO_FULL_SSTV
   else if(sstv_status==SSTV_RECEIVING)lv_label_set_text_fmt(lines[0],"接收中 %u/240",sstv_lines);
   else lv_label_set_text(lines[0],sstv_status==SSTV_COMPLETE?"接收完成":sstv_status==SSTV_INTERRUPTED?"中断，等待新信号":"等待信号");

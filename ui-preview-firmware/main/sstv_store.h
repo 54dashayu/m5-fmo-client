@@ -33,3 +33,6 @@ bool sstv_store_save_partial(const uint8_t *pixels,uint32_t at,uint32_t *id,cons
 #ifdef FMO_SSTV_STREAMING
 bool sstv_stream_finish_partial(uint32_t at);
 #endif
+
+bool sstv_store_needs_initialization(void);
+const char *sstv_store_initialize_confirmed(void);

@@ -36,5 +36,16 @@ static const char*enroll_store_ready(int id,enrollment_job_t*job,cJSON*b){
  char*raw=cJSON_PrintUnformatted(b);if(!raw)return "内存不足";if(strlen(raw)>6144){free(raw);return "证书包过大";}
  // Seed first, certificate last: existing bank was verified to use this key.
  esp_err_t e=nvs_set_blob(nv,skn,job->seed,32);if(e==ESP_OK)e=nvs_commit(nv);if(e==ESP_OK)e=nvs_set_str(nv,ck,raw);if(e==ESP_OK)e=nvs_commit(nv);free(raw);if(e!=ESP_OK)return "证书保存失败，将自动重试";
+ // A validated certificate automatically joins the allowed provider set.
+ uint32_t mask=atomic_load(&auto_ca_mask)|(1u<<id);
+ e=nvs_set_u32(nv,"auto_ca",mask);if(e==ESP_OK)e=nvs_commit(nv);
+ if(e!=ESP_OK)return "证书已保存，自动启用失败，将重试";
+ atomic_store(&auto_ca_mask,mask);
+ // Activate a first identity or refresh the currently selected provider only.
+ // A second provider must never replace another active identity unexpectedly.
+ if(selected_ca==id+1||(!bundle&&selected_ca==0)){
+  e=nvs_set_u8(nv,"profile_next",id+1);if(e==ESP_OK)e=nvs_commit(nv);
+  if(e!=ESP_OK)return "证书已保存，启用待重试";
+ }
  e=enroll_cancel(id);return e==ESP_OK?NULL:"证书已保存，领取任务收尾失败，将自动重试";
 }

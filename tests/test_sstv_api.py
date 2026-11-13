@@ -19,6 +19,9 @@ typedef struct{void*http;cJSON*input,*output;bool usb;}request_t;
 static bool authorized,busy;static int failed,sent;static uint8_t image[SSTV_BYTES],received[SSTV_BYTES];
 static bool auth(request_t*r){(void)r;return authorized;}
 static bool voice_busy(void){return busy;}
+static bool receiving;
+static bool sstv_rx_active(void){return receiving;}
+static const char*js(cJSON*j,const char*k){cJSON*v=cJSON_GetObjectItemCaseSensitive(j,k);return cJSON_IsString(v)?v->valuestring:NULL;}
 static cJSON*body(request_t*r){return cJSON_Duplicate(r->input,true);}
 static int fail(request_t*r,const char*s){(void)r;(void)s;failed++;return 0;}
 static int success(request_t*r,const char*s){(void)r;(void)s;return 0;}
@@ -36,7 +39,14 @@ tail=r'''
 int main(void){char dir[]="/tmp/sstv-api-XXXXXX";assert(mkdtemp(dir));assert(!sstv_store_init(dir));memset(image,0x92,sizeof(image));uint32_t id;assert(sstv_store_save(image,123,&id));
 request_t r={.http=(void*)1};r.input=cJSON_CreateObject();cJSON_AddNumberToObject(r.input,"id",id);
 gallery_page(&r,"gallery");gallery_page(&r,"gallery_image");gallery_page(&r,"gallery_delete");assert(!r.output&&!sent&&!failed);assert(sstv_store_load(id,received));
-authorized=true;gallery_page(&r,"gallery");assert(cJSON_GetArraySize(cJSON_GetObjectItem(r.output,"images"))==1);cJSON_Delete(r.output);
+gallery_initialize(&r);assert(!failed);
+ authorized=true;gallery_initialize(&r);assert(failed==1);failed=0;
+ cJSON*saved=r.input;r.input=cJSON_Parse("{\"confirm\":\"ERASE_SSTV_ALBUM\"}");
+ busy=true;gallery_initialize(&r);assert(failed==1);busy=false;
+ receiving=true;gallery_initialize(&r);assert(failed==2);receiving=false;
+ gallery_initialize(&r);assert(failed==3);assert(sstv_store_load(id,received));
+ cJSON_Delete(r.input);r.input=saved;failed=0;
+ gallery_page(&r,"gallery");assert(cJSON_GetArraySize(cJSON_GetObjectItem(r.output,"images"))==1);cJSON_Delete(r.output);
 gallery_page(&r,"gallery_image");assert(sent==1&&!memcmp(image,received,sizeof(image)));
 busy=true;gallery_page(&r,"gallery_delete");assert(failed==1&&sstv_store_load(id,received));busy=false;
 r.usb=true;gallery_page(&r,"gallery_image");assert(failed==2&&sent==1);r.usb=false;

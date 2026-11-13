@@ -12,6 +12,7 @@ base=root/'ui-preview-firmware';cjson=Path(os.environ['IDF_PATH'])/'components/j
 code=r'''
 #include <assert.h>
 #include <stdint.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -26,6 +27,7 @@ typedef int esp_err_t;
 #define ESP_ERR_NVS_NOT_FOUND 2
 #define ESP_ERR_INVALID_ARG 3
 #define ESP_ERR_NO_MEM 4
+static atomic_uint auto_ca_mask;
 static int nv,fail_write,fail_at,write_count;static uint8_t selected_ca;static char selected_ca_name[97];static bool identity_restart_pending;static char*bundle;
 static const char*root_keys[]={ROOT,ROOT};
 struct entry {char key[32];unsigned char data[8192];size_t n;};static struct entry db[24];
@@ -38,6 +40,7 @@ int nvs_erase_key(int h,const char*k){(void)h;if(fail_write||(++write_count==fai
 int nvs_commit(int h){(void)h;return fail_write||(++write_count==fail_at)?1:0;}
 int nvs_get_u8(int h,const char*k,uint8_t*v){size_t n=1;return nvs_get_blob(h,k,v,&n);}
 int nvs_set_u8(int h,const char*k,uint8_t v){return nvs_set_blob(h,k,&v,1);}
+int nvs_set_u32(int h,const char*k,uint32_t v){return nvs_set_blob(h,k,&v,4);}
 static bool root_selectable(const char*k){return k&&strcmp(k,"DCeeVS320f36ToVP2eOADVN-Q0LzpMYmiVkmNYzuysY");}
 static int root_slot(cJSON*j,bool create,const char**error){(void)j;(void)create;(void)error;return 1;}
 static const char*js(cJSON*j,const char*k){cJSON*v=cJSON_GetObjectItemCaseSensitive(j,k);return cJSON_IsString(v)?v->valuestring:NULL;}
@@ -47,13 +50,19 @@ static cJSON*stored_json(const char*k,size_t cap){struct entry*e=find(k,0);retur
 #include "empty_profile.inc"
 int main(void){
  unsigned char seed[32]={SEED};unsigned char other[32];memset(other,99,32);
- nvs_set_blob(nv,"seed",seed,32);nvs_set_str(nv,"cert","active identity unchanged");
+ nvs_set_blob(nv,"seed",seed,32);bundle="active identity unchanged";selected_ca=1;nvs_set_str(nv,"cert",bundle);
  assert(enroll_save(0,REQ)==0);assert(enroll_save(1,REQ)==0);
  enrollment_job_t a,b;assert(enroll_read(0,&a)&&enroll_read(1,&b));
  // Changing the active seed does not change either task's application key.
  nvs_set_blob(nv,"seed",other,32);assert(enroll_read(1,&b)&&!memcmp(b.seed,seed,32));
  assert(enroll_cancel(0)==0);assert(!enroll_read(0,&a)&&enroll_read(1,&b));
  cJSON*pack=cJSON_Parse(PACK);assert(enroll_store_ready(1,&b,pack)==NULL);assert(!enroll_read(1,&b));assert(find("cert_bi",0));assert(!memcmp(find("seed_bi",0)->data,seed,32));assert(!strcmp((char*)find("cert",0)->data,"active identity unchanged"));assert(!memcmp(find("seed",0)->data,other,32));
+ assert(atomic_load(&auto_ca_mask)==2);assert(!find("profile_next",0));
+ // First/current-provider approval activates durably, with other identity preserved.
+ selected_ca=2;assert(enroll_save(1,REQ)==0);assert(enroll_store_ready(1,&b,pack)==NULL);
+ assert(find("profile_next",0)&&find("profile_next",0)->data[0]==2);nvs_erase_key(nv,"profile_next");
+ selected_ca=0;bundle=NULL;assert(enroll_store_ready(1,&b,pack)==NULL);assert(find("profile_next",0)->data[0]==2);nvs_erase_key(nv,"profile_next");
+ selected_ca=1;bundle="active identity unchanged";
  // Bad signature and wrong request key never replace a bank.
  cJSON*sig=cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(pack,"userCert"),"signature");sig->valuestring[0]=sig->valuestring[0]=='A'?'B':'A';assert(enroll_store_ready(0,&b,pack)!=NULL);assert(!find("cert_bh",0));cJSON_Delete(pack);
  pack=cJSON_Parse(PACK);memcpy(b.seed,other,32);assert(enroll_store_ready(0,&b,pack)!=NULL);assert(!find("cert_bh",0));cJSON_Delete(pack);
@@ -69,7 +78,7 @@ int main(void){
  memcpy(db,snapshot,sizeof(db));
  assert(apply_empty_profile()==0);assert(!find("cert",0));assert(find("cert_bh",0));assert(!memcmp(find("seed",0)->data,seed,32));uint8_t selected=0;assert(nvs_get_u8(nv,"selected_ca",&selected)==0&&selected==2);assert(enroll_read(1,&b));assert(apply_empty_profile()==0);
  char label[97];profile_name_for(2,label,sizeof(label));assert(strstr(label,"BI4TES"));assert(prepare_empty_profile(99)!=NULL);
- crypto_wipe(&a,sizeof(a));crypto_wipe(&b,sizeof(b));puts("PASS independent tasks, seed binding, validated storage without activation, migration and cancellation failure");
+ crypto_wipe(&a,sizeof(a));crypto_wipe(&b,sizeof(b));puts("PASS independent tasks, seed binding, validated storage, automatic first/current identity activation, alternate identity preservation, migration and cancellation failure");
 }
 '''.replace('ROOT',json.dumps(r['subject']['publicKey'])).replace('SEED',','.join(map(str,seed))).replace('REQ',json.dumps(request)).replace('PACK',json.dumps(bundle))
 with tempfile.TemporaryDirectory() as td:
