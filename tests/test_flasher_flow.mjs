@@ -19,7 +19,7 @@ async function scenario(id,{install=false,mismatch=false,incompatible=false,canc
  if(mismatch||incompatible||smallFlash){assert(el('review').hidden);assert.match(el('status').textContent,/未写入/);return;}
  assert.equal(el('review').hidden,false);assert.equal(el('boardSelect').disabled,true);
  if(cancel){await el('cancelFlash').listeners.click();assert.equal(writes.length,0);return;}
- await el('confirmFlash').listeners.click();assert.equal(writes.length,1);assert.equal(writes[0].eraseAll,false);assert.equal(writes[0].flashSize,BOARDS[id].flashSize);assert.deepEqual(Array.from(writes[0].fileArray,p=>p.address),install?BOARDS[id].addresses:migrate?[BOARDS[id].app,0x8000]:[BOARDS[id].app]);assert(signals.some(([k,v])=>k==='R'&&v===true));assert.match(el('status').textContent,/成功/);
+ await el('confirmFlash').listeners.click();assert.equal(writes.length,1);assert.equal(writes[0].eraseAll,false);assert.equal(writes[0].flashSize,BOARDS[id].flashSize);assert.deepEqual(Array.from(writes[0].fileArray,p=>p.address),install?BOARDS[id].addresses:migrate?(id==='m5-fire'?[BOARDS[id].app,0x1000,0x8000]:[BOARDS[id].app,0x8000]):[BOARDS[id].app]);assert(signals.some(([k,v])=>k==='R'&&v===true));assert.match(el('status').textContent,/成功/);
 }
 for(const id of Object.keys(BOARDS)){for(const options of [{},{install:true},{cancel:true},{mismatch:true},{incompatible:true},{migrate:true},{smallFlash:true}])await scenario(id,options)}
 console.log('PASS real flasher flow: both boards, app-only upgrade, initial layout, pre-confirm no writes, cancellation, chip/partition refusal and reset pulse');

@@ -56,10 +56,10 @@ $('flash').addEventListener('click',async()=>{
  const transport=new Transport(port,true);const loader=new ESPLoader({transport,baudrate:115200,terminal:{clean(){},write:log,writeLine:log},debugLogging:false});session={transport,loader,files,boardId,ready:false};status('正在连接 '+board.name+'…');await loader.main();if(loader.chip.CHIP_NAME!==board.chip)throw Error('芯片与所选硬件不符，已停止，未写入');
  const detected=await loader.detectFlashSize();if(!detected||!/^\d+MB$/.test(detected)||parseInt(detected,10)<16)throw Error('本版需要至少 16MB Flash，检测到 '+(detected||'未知容量')+'，未写入');
  let migrated=false;
- if(!install){status('检查现有分区…');const plan=partitionPlan(await loader.readFlash(0x8000,0x1000),boardId);if(!plan)throw Error('分区不兼容，未写入。请备份并核对原固件布局。');if(plan==='migrate'){const table=manifest.parts.find(p=>p.address===0x8000);const data=await binary(table);if(partitionPlan(data,boardId)!=='current')throw Error('新相册分区校验失败，未写入');files.push({address:0x8000,data});migrated=true;}}
+ if(!install){status('检查现有分区…');const plan=partitionPlan(await loader.readFlash(0x8000,0x1000),boardId);if(!plan)throw Error('分区不兼容，未写入。请备份并核对原固件布局。');if(plan==='migrate'){const table=manifest.parts.find(p=>p.address===0x8000);const data=await binary(table);if(partitionPlan(data,boardId)!=='current')throw Error('新相册分区校验失败，未写入');if(boardId==='m5-fire'){const boot=manifest.parts.find(p=>p.address===0x1000);files.push({address:boot.address,data:await binary(boot)});}files.push({address:0x8000,data});migrated=true;}}
 
  session.ready=true;
- $('reviewText').textContent='固件 v'+manifest.version+' · '+board.name+' · '+(install?(boardId==='m5-fire'?'首次安装：将写入引导程序、分区表和应用；原固件数据不保证兼容。':'首次安装：将写入新分区和应用，清空新布局设置区，需重新配网与配置证书。'):(migrated?'保留配置升级：更新应用并新增相册分区，已有设置和数据分区位置不变。':'保留配置升级：仅写应用区，保留 Wi-Fi、密钥、证书和相册。'));
+ $('reviewText').textContent='固件 v'+manifest.version+' · '+board.name+' · '+(install?(boardId==='m5-fire'?'首次安装：将写入引导程序、分区表和应用；原固件数据不保证兼容。':'首次安装：将写入新分区和应用，清空新布局设置区，需重新配网与配置证书。'):(migrated?'保留配置升级：更新应用并新增相册分区；M5 同时更新引导程序以识别完整容量。已有设置和数据分区位置不变。':'保留配置升级：仅写应用区，保留 Wi-Fi、密钥、证书和相册。'));
  $('review').hidden=false;status('检查通过，尚未写入。请核对信息后确认开始刷写。');
  }catch(e){status(e.name==='NotFoundError'?'已取消选择，未写入固件。':'准备失败，未写入：'+e.message);await release(true);}
  finally{busy=false;update();if(session?.ready)$('confirmFlash').focus();}
