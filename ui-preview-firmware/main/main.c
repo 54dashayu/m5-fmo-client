@@ -1,4 +1,6 @@
 #include "call_indicator.h"
+#include "key_layout.h"
+#include "screen_sleep.h"
 #include "board.h"
 #include "nvs.h"
 #ifdef CONFIG_FMO_BOARD_XINGZHI
@@ -30,9 +32,12 @@ extern const lv_font_t font20, history_font, status_font, ui_small, ui_call, ui_
 #include "utf8_name.h"
 static bool relay_glyph(uint32_t c){lv_font_glyph_dsc_t d;return lv_font_get_glyph_dsc(&relay_font,&d,c,0);}
 static lv_obj_t *title,*lines[5],*footer,*brand;
+static lv_obj_t *a_hint,*c_hint;
 static lv_obj_t *home,*battery_label,*battery_fill,*local_call,*net,*caption,*badge,*call_label,*hint,*relay_name,*relay_id,*home_notice,*last_call,*previous_call,*b_hint,*bars[9];
 static buttons_t keys;
 static uint8_t rotation;
+unsigned ui_key_layout;bool ui_screen_sleeping;
+static screen_sleep_t screen_sleep;
 static bool breathing=true,ptt_latch=true;
 bool ui_flashing_enabled=!FMO_HAS_SIDE_LEDS;unsigned ui_call_rgb=0xffd166,ui_call_opacity=255;
 static nvs_handle_t ui_nv;
@@ -47,31 +52,51 @@ static bool save_settings(uint8_t rot,bool pulse,bool latch){
  if(!ui_nv_ready||nvs_set_u32(ui_nv,"options",packed)!=ESP_OK||nvs_commit(ui_nv)!=ESP_OK){snprintf(settings_notice,sizeof(settings_notice),"设置保存失败，请重试");return false;}
  rotation=rot;breathing=pulse;ui_flashing_enabled=call_flashing_enabled(FMO_HAS_SIDE_LEDS,pulse);ptt_latch=latch;settings_notice[0]=0;return true;
 }
+static bool save_key_layout(unsigned scheme){
+ if(scheme>=KEY_LAYOUT_COUNT||!ui_nv_ready||nvs_set_u32(ui_nv,"key_layout",scheme)!=ESP_OK||nvs_commit(ui_nv)!=ESP_OK){snprintf(settings_notice,sizeof(settings_notice),"按键方案保存失败");return false;}
+ ui_key_layout=scheme;settings_notice[0]=0;buttons_block(&keys);return true;
+}
 static void load_settings(void){
  ui_nv_ready=nvs_open("fmo_ui",NVS_READWRITE,&ui_nv)==ESP_OK;
  uint32_t packed=12;if(ui_nv_ready&&nvs_get_u32(ui_nv,"options",&packed)==ESP_OK&&packed<=15){rotation=packed&3;breathing=packed&4;ptt_latch=packed&8;ui_flashing_enabled=call_flashing_enabled(FMO_HAS_SIDE_LEDS,breathing);}
+ uint32_t scheme=0;if(ui_nv_ready&&nvs_get_u32(ui_nv,"key_layout",&scheme)==ESP_OK&&scheme<KEY_LAYOUT_COUNT)ui_key_layout=scheme;else ui_key_layout=0;
 }
 
 static display_idle_t display_idle;
 unsigned ui_backlight_percent=100,ui_idle_seconds,ui_pressed_mask;
 unsigned ui_key_events;int ui_last_key=-1,ui_last_action=-1;
-enum {HOME,MENU,RELAYS,VOLUME,IDENTITY,WEB,MIC,DISCOVER,CA_LIST,CA_CONFIRM,SETTINGS};
+enum {HOME,MENU,RELAYS,VOLUME,IDENTITY,WEB,MIC,DISCOVER,CA_LIST,CA_CONFIRM,SETTINGS,KEY_LAYOUT};
 static int page=HOME,selection=0;
 static device_profile_t ca_profiles[DEVICE_PROFILE_MAX],ca_target;
 static int ca_count;
 static bool ca_submitted;
 static char ca_notice[96],ca_current[97];
-static void load_ca_profiles(void){ca_count=device_profiles(ca_profiles);ca_notice[0]=0;ca_current[0]=0;if(ca_count<0){ca_count=0;snprintf(ca_notice,sizeof(ca_notice),"通联或后台忙，请稍后按 B 刷新");}for(int i=0;i<ca_count;i++)if(ca_profiles[i].current)snprintf(ca_current,sizeof(ca_current),"%s",ca_profiles[i].name);}
+static void load_ca_profiles(void){ca_count=device_profiles(ca_profiles);ca_notice[0]=0;ca_current[0]=0;if(ca_count<0){ca_count=0;snprintf(ca_notice,sizeof(ca_notice),"通联或后台忙，请稍后按 %c 刷新",key_layout_letter(ui_key_layout,1));}for(int i=0;i<ca_count;i++)if(ca_profiles[i].current)snprintf(ca_current,sizeof(ca_current),"%s",ca_profiles[i].name);}
 
 static relay_t discovered_ui[DISCOVERY_MAX];static int discovered_count;static uint32_t discovered_revision;static char discovery_notice[96];
 static bool idle_started=false,was_active=false,show_clock=false;
 static int64_t idle_since;
 static char held_call[16];
-static const char*items[]={"选择中继","音量与静音","设备身份","网页管理","扬声器测试","麦克风测试","显示与按键","返回通联"};
-static void set_text(lv_obj_t*o,const char*s){if(strcmp(lv_label_get_text(o),s))lv_label_set_text(o,s);}
+static const char*items[]={"选择中继","音量与静音","设备身份","网页管理","扬声器测试","麦克风测试","显示与按键","按键分配方案","屏幕休眠","返回通联"};
+static void set_text(lv_obj_t*o,const char*s){
+ char mapped[256];snprintf(mapped,sizeof(mapped),"%s",s);
+ // Existing UI hints describe logical A/B/C roles, translate to physical keys.
+ // The scheme selector itself deliberately shows physical A/B/C unchanged.
+ if(page!=KEY_LAYOUT&&(o==footer||o==hint||o==b_hint||o==a_hint||o==c_hint||(page==SETTINGS&&o==lines[3])||(page==CA_CONFIRM&&!ca_submitted&&o==lines[4])))for(char*p=mapped;*p;p++)if(*p>='A'&&*p<='C'&&(p==mapped||p[-1]==' '||p[-1]=='/'||(unsigned char)p[-1]>=128)&&(p[1]==' '||p[1]=='/'||(unsigned char)p[1]>=128))*p=key_layout_letter(ui_key_layout,*p-'A');
+ if(strcmp(lv_label_get_text(o),mapped))lv_label_set_text(o,mapped);
+}
 static void set_text_fmt(lv_obj_t*o,const char*fmt,...){char text[256];va_list args;va_start(args,fmt);vsnprintf(text,sizeof(text),fmt,args);va_end(args);set_text(o,text);}
 #define lv_label_set_text set_text
 #define lv_label_set_text_fmt set_text_fmt
+static int ui_y(int y){return y*lv_disp_get_ver_res(NULL)/240;}
+static void ui_pos(lv_obj_t*o,int x,int y){lv_obj_set_pos(o,x,ui_y(y));}
+static void ui_size(lv_obj_t*o,int w,int h){lv_obj_set_size(o,w,ui_y(h));}
+static void ui_set_y(lv_obj_t*o,int y){lv_obj_set_y(o,ui_y(y));}
+static void ui_height(lv_obj_t*o,int h){lv_obj_set_height(o,ui_y(h));}
+#define lv_obj_set_pos ui_pos
+#define lv_obj_set_size ui_size
+#define lv_obj_set_y ui_set_y
+#define lv_obj_set_height ui_height
 static lv_obj_t *label(const char *text,int x,int y,const lv_font_t *font,uint32_t color){
  lv_obj_t *o=lv_label_create(lv_scr_act());lv_label_set_text(o,text);lv_obj_set_pos(o,x,y);lv_obj_set_width(o,FMO_WIDTH-24);lv_obj_set_style_text_font(o,font,0);lv_obj_set_style_text_color(o,lv_color_hex(color),0);return o;
 }
@@ -81,7 +106,6 @@ static lv_obj_t *box(lv_obj_t*p,int x,int y,int w,int h,uint32_t bg,int radius){
 static lv_obj_t *home_label(const char*t,int x,int y,int w,const lv_font_t*f,uint32_t c){
  lv_obj_t*o=lv_label_create(home);lv_obj_set_pos(o,x,y);lv_obj_set_width(o,w);lv_obj_set_style_text_font(o,f,0);lv_obj_set_style_text_color(o,lv_color_hex(c),0);lv_label_set_long_mode(o,LV_LABEL_LONG_DOT);lv_label_set_text(o,t);return o;
 }
-#ifndef CONFIG_FMO_BOARD_XINGZHI
 static void build_wide_home(void){
  home=box(lv_scr_act(),0,0,320,240,0x0b151c,0);
  home_label(FMO_BOARD_TITLE,12,8,72,&status_font,0xd4e4eb);
@@ -106,21 +130,19 @@ static void build_wide_home(void){
  relay_id=home_label("",259,174,49,&status_font,0xb4c7d2);lv_obj_set_style_text_align(relay_id,LV_TEXT_ALIGN_RIGHT,0);
  home_notice=home_label("",12,190,296,&ui_small,0xc2d3de);
  box(home,0,208,320,32,0x101e28,0);box(home,0,208,320,1,0x243743,0);
- lv_obj_t*o=home_label("A  音量 -",0,211,106,&ui_small,0xd4e4eb);lv_obj_set_style_text_align(o,LV_TEXT_ALIGN_CENTER,0);
+ lv_obj_t*o=a_hint=home_label("A  音量 -",0,211,106,&ui_small,0xd4e4eb);lv_obj_set_style_text_align(o,LV_TEXT_ALIGN_CENTER,0);
  b_hint=home_label("B  开始发话",106,211,108,&ui_small,0x58d6b2);lv_obj_set_style_text_align(b_hint,LV_TEXT_ALIGN_CENTER,0);
- o=home_label("C  音量 +",214,211,106,&ui_small,0xd4e4eb);lv_obj_set_style_text_align(o,LV_TEXT_ALIGN_CENTER,0);
+ o=c_hint=home_label("C  音量 +",214,211,106,&ui_small,0xd4e4eb);lv_obj_set_style_text_align(o,LV_TEXT_ALIGN_CENTER,0);
  const char*sub[]={"长按选中继","PTT 模式见设置","长按进菜单"};for(int i=0;i<3;i++){o=home_label(sub[i],i*107,225,106,&ui_small,0xa9bfcd);lv_obj_set_style_text_align(o,LV_TEXT_ALIGN_CENTER,0);}
  lv_obj_add_flag(home,LV_OBJ_FLAG_HIDDEN);
 }
-#endif
 #include "boards/xingzhi/home.inc"
 static void build_home(void){
-#ifndef CONFIG_FMO_BOARD_XINGZHI
  if(FMO_WIDTH==320){build_wide_home();return;}
-#endif
  build_compact_home();
 }
 static void refresh_home(const device_view_t*v,const voice_view_t*a,const relay_t*r){
+ lv_label_set_text(a_hint,"A 音量-");lv_label_set_text(c_hint,"C 音量+");
  uint32_t accent=a->tx?0xff3030:a->rx?0x20ff70:v->mqtt_online?0x58d6b2:0xa8b5bf;
  uint32_t tint=a->tx?0x441818:a->rx?0x123d25:v->mqtt_online?0x12352f:0x263139;
  int percent;bool charging;battery_view(&percent,&charging);if(percent<0)lv_label_set_text(battery_label,"--");else lv_label_set_text_fmt(battery_label,"%d%%%s",percent,charging?"+":"");if(percent<=0)lv_obj_add_flag(battery_fill,LV_OBJ_FLAG_HIDDEN);else{lv_obj_clear_flag(battery_fill,LV_OBJ_FLAG_HIDDEN);lv_obj_set_width(battery_fill,(18*percent+99)/100);}lv_obj_set_style_bg_color(battery_fill,lv_color_hex(charging?0x5ceaff:percent<=25?0xff7766:0x58d6b2),0);
@@ -160,14 +182,15 @@ static void refresh_home(const device_view_t*v,const voice_view_t*a,const relay_
  int peak=a->tx?a->mic_peak:a->rx?a->speaker_peak:0;int level=peak/1800;if(level>9)level=9;
  for(int i=0;i<9;i++){int h=i<level?5+(i%3)*4:3;lv_obj_set_pos(bars[i],(FMO_WIDTH==240?180:247)+i*5,(FMO_WIDTH==240?113:119)-h);lv_obj_set_height(bars[i],h);lv_obj_set_style_bg_color(bars[i],lv_color_hex(i<level?accent:0x35505f),0);}
 }
-static void go(int next){voice_ptt(false);voice_mic_test(false);page=next;device_management_ap(next==WEB);selection=0;buttons_block(&keys);if(next==RELAYS)selection=relays_current(NULL,NULL);if(next==CA_CONFIRM)ca_submitted=false;if(next==MIC)voice_mic_test(true);if(next==IDENTITY||next==CA_LIST)load_ca_profiles();if(next==DISCOVER){discovered_count=discovery_list(discovered_ui,&discovered_revision);discovery_refresh();discovery_notice[0]=0;}}
+static void go(int next){voice_ptt(false);voice_mic_test(false);page=next;device_management_ap(next==WEB);selection=0;buttons_block(&keys);if(next==RELAYS)selection=relays_current(NULL,NULL);if(next==CA_CONFIRM)ca_submitted=false;if(next==KEY_LAYOUT)selection=ui_key_layout;if(next==MIC)voice_mic_test(true);if(next==IDENTITY||next==CA_LIST)load_ca_profiles();if(next==DISCOVER){discovered_count=discovery_list(discovered_ui,&discovered_revision);discovery_refresh();discovery_notice[0]=0;}}
 static void key(int k,key_action_t action,void*ctx){(void)ctx;ui_key_events++;ui_last_key=k;ui_last_action=action;ESP_LOGI("buttons","key=%d action=%d",k,action);
  if(action==KEY_PTT_STOP||action==KEY_CANCEL){voice_ptt(false);return;}
  if(action==KEY_PTT_START){if(page==HOME)voice_ptt(true);return;}
+ if(page==KEY_LAYOUT){if(action==KEY_LONG&&k==0){go(HOME);return;}if(action==KEY_SHORT){if(k==0)selection=(selection+KEY_LAYOUT_COUNT-1)%KEY_LAYOUT_COUNT;if(k==2)selection=(selection+1)%KEY_LAYOUT_COUNT;if(k==1){voice_ptt(false);if(save_key_layout(selection)){go(HOME);create_ui();}}}return;}
  if(action==KEY_LONG){if(page==HOME){if(k==0)go(RELAYS);if(k==1)voice_ptt(false);if(k==2)go(MENU);}else if(k==0)go(HOME);return;}
  if(action!=KEY_SHORT)return;
  if(page==HOME){if(k==0)voice_volume(-5);if(k==1&&ptt_latch)voice_toggle_ptt();if(k==2)voice_volume(5);return;}
- if(page==MENU){if(k==0)selection=(selection+7)%8;if(k==2)selection=(selection+1)%8;if(k==1){int target=selection;if(target==0)go(RELAYS);else if(target==1)go(VOLUME);else if(target==2)go(IDENTITY);else if(target==3)go(WEB);else if(target==4)voice_tone();else if(target==5)go(MIC);else if(target==6)go(SETTINGS);else go(HOME);}return;}
+ if(page==MENU){if(k==0)selection=(selection+9)%10;if(k==2)selection=(selection+1)%10;if(k==1){int target=selection;if(target==0)go(RELAYS);else if(target==1)go(VOLUME);else if(target==2)go(IDENTITY);else if(target==3)go(WEB);else if(target==4)voice_tone();else if(target==5)go(MIC);else if(target==6)go(SETTINGS);else if(target==7)go(KEY_LAYOUT);else if(target==8){go(HOME);screen_sleep_enter(&screen_sleep);buttons_block(&keys);}else go(HOME);}return;}
  if(page==SETTINGS){
  if(k==0){selection=(selection+2)%3;}if(k==2)selection=(selection+1)%3;
  if(k==1){voice_ptt(false);if(selection==0){if(save_settings((rotation+1)%4,breathing,ptt_latch)){lv_disp_set_rotation(NULL,(lv_disp_rot_t)rotation);create_ui();}}
@@ -195,9 +218,14 @@ static void refresh(void){
  lv_obj_set_pos(footer,12,220);lv_obj_set_style_text_font(footer,&status_font,0);lv_obj_set_style_text_color(footer,lv_color_hex(0x70d5ae),0);lv_label_set_text(footer,"长按 A 返回       B 确认");
  if(page==HOME){
   refresh_home(&v,&a,&relay);
- }else if(page==MENU){lv_label_set_text_fmt(title,"设备菜单  %d/2",selection/5+1);for(int i=0;i<5;i++){int n=(selection/5)*5+i;if(n<8)lv_label_set_text_fmt(lines[i],"%s %s",n==selection?">":" ",items[n]);else lv_label_set_text(lines[i],"");}lv_label_set_text(footer,"A 上项  B 确认  C 下项 / 长按A返回");
+ }else if(page==MENU){lv_label_set_text_fmt(title,"设备菜单  %d/2",selection/5+1);for(int i=0;i<5;i++){int n=(selection/5)*5+i;if(n<10)lv_label_set_text_fmt(lines[i],"%s %s",n==selection?">":" ",items[n]);else lv_label_set_text(lines[i],"");}lv_label_set_text(footer,"A 上项  B 确认  C 下项 / 长按A返回");
  }else if(page==RELAYS){int n=relays_count();if(selection>=n)selection=current<n?current:-1;int pos=relays_order_position(selection);int total=n+1,start=pos/4*4;lv_label_set_text_fmt(title,"选择中继 %d/%d",pos/4+1,(total+3)/4);for(int i=0;i<4;i++){int p=start+i;lv_obj_set_style_text_color(lines[i],lv_color_hex(p==n?0xffc567:0xecf2f8),0);if(p>=total)lv_label_set_text(lines[i],"");else if(p==n)lv_label_set_text_fmt(lines[i],"%s + 发现中继",selection<0?">":" ");else{int index=relays_order_at(p);relay_t r={0};if(!relays_get(index,&r)){lv_label_set_text(lines[i],"");continue;}char name[65];name_for_display(name,sizeof(name),r.name[0]?r.name:r.call,relay_glyph);lv_label_set_text_fmt(lines[i],"%s %s%s / %s",selection==index?">":" ",current==index?"[当前] ":"",name,r.call);}}lv_label_set_text_fmt(lines[4],"体系：%s",relays_profile_name());lv_label_set_text(footer,"A 上项  B 确认  C 下项 / 长按A返回");
  }else if(page==DISCOVER){relay_t fresh[DISCOVERY_MAX];uint32_t rev;int num=discovery_list(fresh,&rev);if(rev!=discovered_revision||num!=discovered_count){relay_t old={0};bool was_refresh=selection==discovered_count;if(selection<discovered_count)old=discovered_ui[selection];memcpy(discovered_ui,fresh,num*sizeof(relay_t));discovered_count=num;discovered_revision=rev;discovery_notice[0]=0;selection=was_refresh?num:0;for(int i=0;!was_refresh&&i<num;i++)if(fresh[i].uid==old.uid&&!strcmp(fresh[i].fingerprint,old.fingerprint))selection=i;}int total=discovered_count+1,start=selection/4*4;lv_label_set_text_fmt(title,"发现中继 %d/%d",selection/4+1,(total+3)/4);for(int i=0;i<4;i++){int p=start+i;if(p>=total)lv_label_set_text(lines[i],"");else if(p==discovered_count)lv_label_set_text_fmt(lines[i],"%s 刷新列表",selection==p?">":" ");else{char name[65];name_for_display(name,sizeof(name),discovered_ui[p].name,relay_glyph);lv_label_set_text_fmt(lines[i],"%s %s",selection==p?">":" ",name);}}char progress[96];discovery_status(progress,sizeof(progress));lv_label_set_text(lines[4],discovery_notice[0]?discovery_notice:progress);lv_label_set_text(footer,"A 上项  B 选择  C 下项 / 长按A返回");
+ }else if(page==KEY_LAYOUT){lv_label_set_text_fmt(title,"按键方案 %d/6",selection+1);
+ const char*roles[]={"音量- / 返回","PTT / 确认","音量+ / 菜单"};
+ for(int i=0;i<3;i++)lv_label_set_text_fmt(lines[i],"%c：%s",'A'+i,roles[key_layouts[selection][i]]);
+ lv_label_set_text(lines[3],"实体按键在上方：左 A 中 B 右 C");lv_label_set_text(lines[4],settings_notice);
+ lv_label_set_text(footer,"本页固定：A 上项 B 保存 C 下项");
  }else if(page==SETTINGS){lv_label_set_text(title,"显示与按键");
  lv_label_set_text_fmt(lines[0],"%s 屏幕翻转：%d 度",selection==0?">":" ",rotation*90);
  lv_label_set_text_fmt(lines[1],"%s 收发提示：%s",selection==1?">":" ",FMO_HAS_SIDE_LEDS&&breathing?"呼吸灯":"呼号闪烁");
@@ -252,6 +280,6 @@ void app_main(void){
  lv_timer_handler();esp_err_t result=device_web_start();
  if(result!=ESP_OK){lv_label_set_text(title,"USB 后台启动失败");ESP_LOGE("main","init: %s",esp_err_to_name(result));}
  if(result==ESP_OK){load_settings();lv_disp_set_rotation(NULL,(lv_disp_rot_t)rotation);create_ui();}
- int pins[3]={FMO_KEY_A,FMO_KEY_B,FMO_KEY_C};uint8_t initial=0;for(int i=0;i<3;i++)if(!gpio_get_level(pins[i]))initial|=1<<i;buttons_init(&keys,initial,key,NULL);buttons_set_momentary(&keys,!ptt_latch);int64_t updated=0,led_updated=0;
- while(1){int64_t now=esp_timer_get_time();uint8_t pressed=0;for(int i=0;i<3;i++)if(!gpio_get_level(pins[i]))pressed|=1<<i;if(result==ESP_OK){if(now-led_updated>=25000){voice_view_t led_voice;voice_view(&led_voice);side_leds_update(FMO_HAS_SIDE_LEDS&&breathing&&led_voice.tx,FMO_HAS_SIDE_LEDS&&breathing&&led_voice.rx,now/1000);unsigned brightness=display_idle_step(&display_idle,now/1000,led_voice.tx||led_voice.rx||pressed);ui_idle_seconds=(now/1000-display_idle.last_activity)/1000;ui_pressed_mask=pressed;if(brightness!=ui_backlight_percent){disp_driver_set_brightness(brightness);ui_backlight_percent=brightness;}led_updated=now;}buttons_step(&keys,pressed,now/1000,page==HOME);if(now-updated>150000){refresh();updated=now;}}lv_timer_handler();vTaskDelay(pdMS_TO_TICKS(10));}
+ int pins[3]={FMO_KEY_A,FMO_KEY_B,FMO_KEY_C};uint8_t initial=0;for(int i=0;i<3;i++)if(!gpio_get_level(pins[i]))initial|=1<<i;buttons_init(&keys,key_layout_mask(ui_key_layout,initial),key,NULL);buttons_set_momentary(&keys,!ptt_latch);int64_t updated=0,led_updated=0;
+ while(1){int64_t now=esp_timer_get_time();uint8_t pressed=0;for(int i=0;i<3;i++)if(!gpio_get_level(pins[i]))pressed|=1<<i;if(result==ESP_OK){if(now-led_updated>=25000){voice_view_t led_voice;voice_view(&led_voice);side_leds_update(FMO_HAS_SIDE_LEDS&&breathing&&led_voice.tx,FMO_HAS_SIDE_LEDS&&breathing&&led_voice.rx,now/1000);uint8_t visible_keys=screen_sleep_step(&screen_sleep,led_voice.tx||led_voice.rx,pressed);(void)visible_keys;ui_screen_sleeping=screen_sleep.sleeping;unsigned brightness=screen_sleep.sleeping?0:display_idle_step(&display_idle,now/1000,led_voice.tx||led_voice.rx||pressed);ui_idle_seconds=(now/1000-display_idle.last_activity)/1000;ui_pressed_mask=pressed;if(brightness!=ui_backlight_percent){disp_driver_set_brightness(brightness);ui_backlight_percent=brightness;}led_updated=now;}uint8_t usable=screen_sleep.sleeping||screen_sleep.consume?0:pressed;buttons_step(&keys,page==KEY_LAYOUT?usable:key_layout_mask(ui_key_layout,usable),now/1000,page==HOME);if(now-updated>150000){refresh();updated=now;}}lv_timer_handler();vTaskDelay(pdMS_TO_TICKS(10));}
 }

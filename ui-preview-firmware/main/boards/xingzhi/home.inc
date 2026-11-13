@@ -20,8 +20,8 @@ static void build_compact_home(void){
  relay_id=home_label("",184,176,48,&status_font,0xb4c7d2);
  home_notice=home_label("",8,194,224,&ui_small,0xc2d3de);lv_label_set_long_mode(home_notice,LV_LABEL_LONG_SCROLL_CIRCULAR);
  box(home,0,215,240,25,0x101e28,0);
- home_label("A 音量-",4,221,67,&ui_small,0xd4e4eb);
+ a_hint=home_label("A 音量-",4,221,67,&ui_small,0xd4e4eb);
  b_hint=home_label("B 开始发话",74,221,96,&ui_small,0x58d6b2);
- home_label("C 音量+",174,221,66,&ui_small,0xd4e4eb);
+ c_hint=home_label("C 音量+",174,221,66,&ui_small,0xd4e4eb);
  lv_obj_add_flag(home,LV_OBJ_FLAG_HIDDEN);
 }

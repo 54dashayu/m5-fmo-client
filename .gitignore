@@ -28,3 +28,5 @@ web-flasher/public/firmware/
 /build-m5-regression/
 /ui-preview-firmware/sdkconfig.xingzhi
 /ui-preview-firmware/sdkconfig.xingzhi.old
+
+/build-profile-*/

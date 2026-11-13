@@ -1,0 +1,34 @@
+{
+  "schema": 1,
+  "id": "xingzhi-cube-1.54tft-wifi",
+  "chip": "esp32s3",
+  "flash_mb": 16,
+  "psram_mb": 8,
+  "display": {
+    "model": "1.54 TFT ST7789",
+    "driver": "st7789",
+    "width": 240,
+    "height": 240,
+    "spi_mode": 3,
+    "clock_hz": 40000000,
+    "invert": true,
+    "bgr": false,
+    "swap_xy": false,
+    "mirror_x": false,
+    "mirror_y": false,
+    "gap_x": 0,
+    "gap_y": 0,
+    "backlight_inverted": false
+  },
+  "pins": {
+    "lcd_mosi": 10, "lcd_sclk": 9, "lcd_dc": 8, "lcd_cs": 14,
+    "lcd_reset": 18, "backlight": 13, "power_hold": 21,
+    "charging": 38, "battery": 17,
+    "mic_bclk": 5, "mic_ws": 4, "mic_din": 6,
+    "spk_bclk": 15, "spk_ws": 16, "spk_dout": 7,
+    "key_a": 39, "key_b": 0, "key_c": 40
+  },
+  "audio": "i2s-simplex",
+  "battery_calibration": "xingzhi-v1",
+  "power_key": null
+}
