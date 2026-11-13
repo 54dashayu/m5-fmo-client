@@ -72,7 +72,8 @@ assert(!memcmp(preview
 #endif
 ,decoder->image,SSTV_BYTES));
 #endif
-for(int i=0;i<4;i++)sstv_rx_feed(pcm,640,1,2,3);assert(queue->count==4);unsigned old=serial;sstv_rx_feed(pcm,640,1,2,3);assert(serial==old+1);
+for(int i=0;i<4;i++){sstv_rx_feed(pcm,640,1,2,3);}
+assert(queue->count==4);unsigned old=serial;sstv_rx_feed(pcm,640,1,2,3);assert(serial==old+1);
 decoder->status=SSTV_RECEIVING;assert(sstv_rx_enable(false));assert(!atomic_load(&enabled)&&!queue->count);
 #ifdef FMO_SSTV_STREAMING
 assert(!atomic_load(&ready)&&!decoder&&!preview);
