@@ -13,6 +13,11 @@ int main(void){
  assert(!voice_rx_pop(&q,out,&n,&arrival));
  voice_rx_clear(&q);assert(voice_rx_push(&q,in,240,320,0)==0);assert(voice_rx_prebuffer(&q,100000));assert(!voice_rx_prebuffer(&q,240000));
  voice_rx_clear(&q);for(int i=0;i<3;i++)voice_rx_push(&q,in,1200,320,i);assert(voice_rx_prebuffer(&q,100000));voice_rx_push(&q,in,1200,320,4);assert(!voice_rx_prebuffer(&q,100000));
+ // SSTV reserves 480ms within the same fixed buffer; ordinary voice remains 240ms.
+ voice_rx_clear(&q);for(int i=0;i<3;i++)voice_rx_push(&q,in,408,640,i);
+ assert(!voice_rx_prebuffer(&q,200000));assert(voice_rx_prebuffer_for(&q,200000,480));
+ for(int i=0;i<3;i++)voice_rx_push(&q,in,408,640,i);
+ assert(!voice_rx_prebuffer_for(&q,200000,480));assert(!voice_rx_prebuffer_for(&q,480000,480));
  // Random byte/slot pressure and wrapped reads compared with a FIFO model.
  voice_rx_clear(&q);model_t model[24];unsigned count=0,bytes=0,samples=0;srand(719);
  for(int t=0;t<20000;t++){

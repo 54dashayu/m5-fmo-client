@@ -2,3 +2,6 @@
 nvs,data,nvs,0x9000,0x17000,
 phy_init,data,phy,0x20000,0x1000,
 factory,app,factory,0x30000,0x500000,
+
+# New SSTV gallery; existing NVS and application offsets stay unchanged.
+spiffs,data,spiffs,0x700000,0x100000,

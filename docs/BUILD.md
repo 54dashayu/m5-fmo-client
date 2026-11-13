@@ -4,7 +4,7 @@
 
 ## 在线刷写（电脑 USB）
 
-打开 [在线刷写工具](https://app.bh1jss.net/m5-flasher/)，使用电脑 Chrome / Edge，确认硬件后选择“保留配置升级”或“首次安装”。升级会检查分区并只写应用，下载验 SHA256、写入验 MD5。手机浏览器用于刷完后的配网。浏览器真实 USB 刷写仍待实机验收，可使用下方已验证的命令行方式。
+打开 [在线刷写工具](https://app.bh1jss.net/m5-flasher/)，使用电脑 Chrome / Edge，确认硬件后选择“保留配置升级”或“首次安装”。升级会检查容量及分区：已有相册时只写应用，旧标准布局会新增相册分区并保留原数据，下载验 SHA256、写入验 MD5。手机浏览器用于刷完后的配网。浏览器真实 USB 刷写仍待实机验收，可使用下方已验证的命令行方式。
 
 ## 下载预编译版
 
@@ -38,7 +38,7 @@ python -m esptool --chip esp32 --port PORT --baud 115200 write_flash \
 
 ```sh
 python -m esptool --chip esp32 --port PORT --baud 115200 write_flash \
-  --flash_mode dio --flash_freq 80m --flash_size 4MB \
+  --flash_mode dio --flash_freq 80m --flash_size 16MB \
   0x1000 bootloader.bin \
   0x8000 partition-table.bin \
   0x10000 m5-fmo-client-v0.7.27-app.bin

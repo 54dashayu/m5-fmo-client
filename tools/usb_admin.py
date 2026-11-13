@@ -10,7 +10,7 @@ from serial.tools import list_ports
 class Link:
  def __init__(self,port):self.port=port;self.serial=None;self.lock=threading.Lock();self.events=deque(maxlen=80)
  def diagnostic(self,line):
-  diagnostic=re.search(r'(rst:0x[0-9a-fA-F]+[^\r\n]*|Brownout detector was triggered|Guru Meditation Error[^\r\n]*|A stack overflow in task [A-Za-z0-9_ -]+ has been detected|Stack canary watchpoint triggered[^\r\n]*|Backtrace: [0-9a-fx: ]+|buttons: key=-?\d+ action=\d+|voice: stop=[a-z_]+|mqtt_client: Writing failed: errno=\d+|mqtt_client: Writing didn\'t complete in specified timeout: errno=\d+|mqtt_client: Poll read error: \d+, aborting connection|mqtt_client: mqtt_process_receive: mqtt_message_receive\(\) returned -?\d+|mqtt_client: esp_mqtt_handle_transport_read_error: transport_read\(\) error: errno=\d+|mqtt_client: No PING_RESP, disconnected|mqtt_client: [A-Za-z_]+: Network timeout while reading MQTT message|mqtt_client: MQTT connect failed|device_web: Wi-Fi disconnected: reason=\d+ RSSI=-?\d+|device_web: MQTT recycle wifi=\d+ valid=\d+ changed=\d+ phase=\d+|device_web: MQTT error type=\d+ socket=\d+ tls=\d+ broker=\d+)',line.decode(errors='replace'))
+  diagnostic=re.search(r'(lcd_panel[^:\r\n]*: [^\r\n]*|spi_master: [^\r\n]*|st7789: [^\r\n]*|task_wdt:[^\r\n]*|lv_mem_alloc:[^\r\n]*|Out of memory[^\r\n]*|memory_stage: [a-z_]+ free=\d+ largest=\d+|rst:0x[0-9a-fA-F]+[^\r\n]*|Brownout detector was triggered|Guru Meditation Error[^\r\n]*|A stack overflow in task [A-Za-z0-9_ -]+ has been detected|Stack canary watchpoint triggered[^\r\n]*|Backtrace: [0-9a-fA-Fx: ]+|buttons: key=-?\d+ action=\d+|voice: stop=[a-z_]+|mqtt_client: Writing failed: errno=\d+|mqtt_client: Writing didn\'t complete in specified timeout: errno=\d+|mqtt_client: Poll read error: \d+, aborting connection|mqtt_client: mqtt_process_receive: mqtt_message_receive\(\) returned -?\d+|mqtt_client: esp_mqtt_handle_transport_read_error: transport_read\(\) error: errno=\d+|mqtt_client: No PING_RESP, disconnected|mqtt_client: [A-Za-z_]+: Network timeout while reading MQTT message|mqtt_client: MQTT connect failed|device_web: Wi-Fi disconnected: reason=\d+ RSSI=-?\d+|device_web: MQTT recycle wifi=\d+ valid=\d+ changed=\d+ phase=\d+|device_web: MQTT error type=\d+ socket=\d+ tls=\d+ broker=\d+)',line.decode(errors='replace'))
   if diagnostic:self.events.append({'time':round(time.time()),'event':diagnostic.group(1)})
  def call(self,op,data=None):
   with self.lock:
@@ -48,24 +48,19 @@ class Link:
     raise
 
 def render_management_page(template, s3=False):
- values={'FMO_WEB_TITLE':'ESP32/小智设备管理' if s3 else '机婶婶 · M5 设备管理','FMO_WEB_DEVICE':'小智' if s3 else 'M5','FMO_WEB_MODEL':'ESP32-S3 · 小智' if s3 else 'M5 FIRE','FMO_WEB_PREFIX':'E.' if s3 else 'M.'}
+ values={'FMO_WEB_TITLE':'ESP32/小智设备管理' if s3 else '机婶婶 · M5 设备管理','FMO_WEB_DEVICE':'小智' if s3 else 'M5','FMO_WEB_MODEL':'ESP32-S3 · 小智' if s3 else 'M5GO','FMO_WEB_PREFIX':'E.' if s3 else 'M.'}
  for key,value in values.items():template=template.replace('@'+key+'@',value)
  return template.encode()
 
-def main():
- parser=argparse.ArgumentParser();parser.add_argument('--serial');parser.add_argument('--port',type=int,default=8772);args=parser.parse_args()
- if not args.serial:
-  ports=[p.device for p in list_ports.comports() if p.vid==0x10C4 and p.pid==0xEA60]
-  if len(ports)!=1:parser.error('请使用 --serial 指定 M5 串口；当前 CP2104 数量：'+str(len(ports)))
-  args.serial=ports[0]
- link=Link(args.serial);token=secrets.token_urlsafe(32);authority=f'127.0.0.1:{args.port}';origin='http://'+authority
- device=next((p for p in list_ports.comports() if p.device==args.serial),None)
+def serve(link,serial_port,port):
+ token=secrets.token_urlsafe(32);authority=f'127.0.0.1:{port}';origin='http://'+authority
+ device=next((p for p in list_ports.comports() if p.device==serial_port),None)
  page=render_management_page((Path(__file__).resolve().parents[1]/'ui-preview-firmware/main/web.html').read_text(),bool(device and device.vid==0x303a and device.pid==0x1001))
  class Handler(BaseHTTPRequestHandler):
   def log_message(self,*args):pass
   def send(self,status,value,html=False):
    raw=value if html else json.dumps(value,ensure_ascii=False).encode();self.send_response(status)
-   self.send_header('Content-Type','text/html; charset=utf-8' if html else 'application/json; charset=utf-8');self.send_header('Content-Length',str(len(raw)));self.send_header('Cache-Control','no-store');self.send_header('X-Frame-Options','DENY');self.send_header('X-Content-Type-Options','nosniff');self.send_header('Content-Security-Policy',"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://fmo.bh1jss.net https://fmo.simy.live; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'");self.end_headers()
+   self.send_header('Content-Type','text/html; charset=utf-8' if html else 'application/json; charset=utf-8');self.send_header('Content-Length',str(len(raw)));self.send_header('Cache-Control','no-store');self.send_header('X-Frame-Options','DENY');self.send_header('X-Content-Type-Options','nosniff');self.send_header('Content-Security-Policy',"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://fmo.bh1jss.net https://fmo.simy.live https://space.bh1jss.net; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'");self.end_headers()
    try:self.wfile.write(raw)
    except (BrokenPipeError,ConnectionResetError):pass
   def run_api(self):
@@ -76,7 +71,7 @@ def main():
    if self.command=='GET' and self.path=='/api/transport':return self.send(200,{'usb':True,'token':token})
    if self.headers.get('X-Device-Token')!=token:return self.send(401,{'error':'请刷新本机管理页面'})
    if self.command=='GET' and self.path=='/api/diagnostics':return self.send(200,{'events':list(link.events)})
-   routes={('POST','/api/roots'):'roots',('POST','/api/relays/page'):'relays_paged',('POST','/api/discovery/add'):'discovery_add',('GET','/api/discovery'):'discovery',('POST','/api/discovery/refresh'):'discovery_refresh',('POST','/api/discovery/select'):'discovery_select',('POST','/api/logout'):'logout',('POST','/api/relay/name'):'relay_name',('POST','/api/relay/delete'):'relay_delete',('POST','/api/identity/reset'):'identity_reset',('POST','/api/certificate/rollback'):'rollback',('POST','/api/scan'):'scan',('GET','/api/networks'):'networks',('POST','/api/network/connect'):'network_connect',('POST','/api/network/delete'):'network_delete',('GET','/api/status'):'status',('GET','/api/relays'):'relays',('POST','/api/relays'):'relay_add',('POST','/api/relay/select'):'relay_select',('POST','/api/wifi'):'wifi',('POST','/api/reconnect'):'reconnect',('POST','/api/request'):'request',('POST','/api/certificate'):'certificate',('DELETE','/api/certificate'):'delete'}
+   routes={('GET','/api/mic/diagnostics'):'mic_diagnostics',('POST','/api/sstv/codec-probe'):'sstv_codec_probe',('POST','/api/sstv/storage-probe'):'sstv_storage_probe',('POST','/api/login'):'login',('GET','/api/sstv/wall-probe'):'sstv_wall_probe',('POST','/api/sstv/prepare'):'sstv_prepare',('GET','/api/sstv/status'):'sstv_status',('GET','/api/gallery'):'gallery',('POST','/api/roots'):'roots',('POST','/api/relays/page'):'relays_paged',('POST','/api/discovery/add'):'discovery_add',('GET','/api/discovery'):'discovery',('POST','/api/discovery/refresh'):'discovery_refresh',('POST','/api/discovery/select'):'discovery_select',('POST','/api/logout'):'logout',('POST','/api/relay/name'):'relay_name',('POST','/api/relay/delete'):'relay_delete',('POST','/api/identity/reset'):'identity_reset',('POST','/api/certificate/rollback'):'rollback',('POST','/api/scan'):'scan',('GET','/api/networks'):'networks',('POST','/api/network/connect'):'network_connect',('POST','/api/network/delete'):'network_delete',('GET','/api/status'):'status',('GET','/api/relays'):'relays',('POST','/api/relays'):'relay_add',('POST','/api/relay/select'):'relay_select',('POST','/api/wifi'):'wifi',('POST','/api/reconnect'):'reconnect',('POST','/api/request'):'request',('POST','/api/certificate'):'certificate',('DELETE','/api/certificate'):'delete'}
    op=routes.get((self.command,self.path))
    if not op:return self.send(404,{'error':'未知接口'})
    data={}
@@ -90,11 +85,19 @@ def main():
    except (serial.SerialException,OSError,termios.error,TimeoutError):return self.send(503,{'error':'USB 暂时未连接或设备未回应，请检查连接后重试。'})
   do_GET=do_POST=do_DELETE=run_api
   def setup(self):super().setup();self.connection.settimeout(15)
- server=ThreadingHTTPServer(('127.0.0.1',args.port),Handler);server.daemon_threads=True
+ server=ThreadingHTTPServer(('127.0.0.1',port),Handler);server.daemon_threads=True
  print(f'M5 USB 管理已启动：{origin}（仅本机可访问，不记录密码）',flush=True)
  try:server.serve_forever()
  except KeyboardInterrupt:pass
  finally:
   server.server_close()
   if link.serial:link.serial.close()
+def main():
+ parser=argparse.ArgumentParser();parser.add_argument('--serial');parser.add_argument('--port',type=int,default=8772);args=parser.parse_args()
+ if not args.serial:
+  ports=[p.device for p in list_ports.comports() if p.vid==0x10C4 and p.pid==0xEA60]
+  if len(ports)!=1:parser.error('请使用 --serial 指定 M5 串口；当前 CP2104 数量：'+str(len(ports)))
+  args.serial=ports[0]
+ serve(Link(args.serial),args.serial,args.port)
+
 if __name__=='__main__':main()

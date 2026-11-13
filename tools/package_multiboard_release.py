@@ -6,8 +6,8 @@ p=argparse.ArgumentParser();p.add_argument('--preview',action='store_true');args
 r=Path(__file__).resolve().parents[1]
 if not args.preview:assert not subprocess.check_output(['git','status','--porcelain'],cwd=r,text=True).strip(),'Commit release source first'
 sha=subprocess.check_output(['git','rev-parse','HEAD'],cwd=r,text=True).strip()
-for board,folder,chip,chipid,capacity in [('m5-fire','build-m5-regression','ESP32',0,'4MB'),('xingzhi-cube-1.54tft-wifi','build-xingzhi','ESP32-S3',9,'16MB')]:
- build=r/folder;desc=json.loads((build/'project_description.json').read_text());version=desc['project_version'];assert version=='0.7.38'
+for board,folder,chip,chipid,capacity in [('m5-fire','build-m5-regression','ESP32',0,'16MB'),('xingzhi-cube-1.54tft-wifi','build-xingzhi','ESP32-S3',9,'16MB')]:
+ build=r/folder;desc=json.loads((build/'project_description.json').read_text());version=desc['project_version'];assert version==('0.7.60' if board=='m5-fire' else '0.7.63')
  flash=json.loads((build/'flasher_args.json').read_text());assert flash['extra_esptool_args']['chip']==('esp32' if chipid==0 else 'esp32s3')
  base=board+'/v'+version;out=r/'web-flasher/public/firmware'/base;out.mkdir(parents=True,exist_ok=True)
  parts=[]
@@ -22,7 +22,7 @@ for board,folder,chip,chipid,capacity in [('m5-fire','build-m5-regression','ESP3
   (out/name).write_bytes(data);parts.append(dict(path=base+'/'+name,address=addr,sha256=hashlib.sha256(data).hexdigest(),bytes=len(data)))
  zipname=f'fmo-{board}-v{version}.zip';manifest=dict(version=version,board=board,chip=chip,flashSize=capacity,sourceCommit=sha,parts=parts,download=base+'/'+zipname)
  (out/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n');(out.parent/'manifest.json').write_bytes((out/'manifest.json').read_bytes())
- (out/'README.md').write_bytes((r/'docs/RELEASE_0.7.38.md').read_bytes())
+ (out/'README.md').write_bytes((r/'docs/RELEASE_0.7.63.md').read_bytes())
  (out/'PEER_TRUST_AUDIT_0.7.32.md').write_bytes((r/'docs/PEER_TRUST_AUDIT_0.7.32.md').read_bytes())
  checks=''.join(f'{hashlib.sha256(f.read_bytes()).hexdigest()}  {f.name}\n' for f in sorted(out.iterdir()) if f.is_file() and f.name!='SHA256SUMS' and f.suffix!='.zip')
  (out/'SHA256SUMS').write_text(checks)

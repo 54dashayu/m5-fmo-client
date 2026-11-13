@@ -6,7 +6,7 @@
 
 两套清单分别在 firmware/m5-fire/manifest.json 和 firmware/xingzhi-cube-1.54tft-wifi/manifest.json。所有文件在对应 v版本 目录；旧目录保留可回退。生产发布遵守 docs/RELEASE.md 的确切提交及标签双门禁，之后才更新默认清单和页面。
 
-桌面 Chrome/Edge Web Serial。准备阶段检查下载SHA256、芯片及现有分区；最终确认后才写入，取消不写，升级只写应用。首次安装另需确认。S3 原厂迁移采用全FF initial-settings.bin 初始化新NVS/PHY范围；此文件不含任何设备数据，仅首次安装写入，升级不写。禁止 eraseAll。
+桌面 Chrome/Edge Web Serial。准备阶段检查下载SHA256、芯片及现有分区；最终确认后才写入，取消不写，已有相册时升级只写应用，旧标准布局会新增相册分区。首次安装另需确认。S3 原厂迁移采用全FF initial-settings.bin 初始化新NVS/PHY范围；此文件不含任何设备数据，仅首次安装写入，升级不写。禁止 eraseAll。
 
 esptool-js 0.7.1 重启策略缺少 RTS 置位，网页补充 DTR释放与RTS脉冲；S3使用200ms，原ESP32使用120ms。支持芯片检查不能自动识别同芯片的不同接线，必须由用户核对板型。
 

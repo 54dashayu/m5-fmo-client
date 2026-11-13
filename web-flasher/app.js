@@ -1,6 +1,6 @@
 import {ESPLoader, Transport} from 'esptool-js';
 import {md5} from 'js-md5';
-import {BOARDS,validateManifest,validPartitions,selectedParts} from './board-policy.mjs';
+import {BOARDS,validateManifest,validPartitions,selectedParts,partitionPlan} from './board-policy.mjs';
 const $=id=>document.getElementById(id);
 let boardId='m5-fire';
 let busy=false, session=null, currentManifest=null, refreshing=false;
@@ -29,7 +29,7 @@ async function refreshVersion(){
  finally{refreshing=false;update();}
 }
 $('refreshVersion').addEventListener('click',()=>refreshVersion().catch(()=>{}));
-$('copyLog').addEventListener('click',async()=>{try{await navigator.clipboard.writeText('网页版本：20261113.2\n'+$('versionStatus').textContent+'\n'+$('log').textContent);$('copyLog').textContent='已复制日志';}catch{$('copyLog').textContent='复制失败，请选择日志文字复制';}});
+$('copyLog').addEventListener('click',async()=>{try{await navigator.clipboard.writeText('网页版本：20261113.3\n'+$('versionStatus').textContent+'\n'+$('log').textContent);$('copyLog').textContent='已复制日志';}catch{$('copyLog').textContent='复制失败，请选择日志文字复制';}});
 function changeBoard(){boardId=$('boardSelect').value;const b=BOARDS[boardId];$('hardware').checked=false;$('installConfirm').checked=false;$('hardwareDetails').textContent=b.hardware;$('selectedPhoto').src=b.photo;$('selectedPhoto').alt=b.name+' 实机照片';$('boardIntro').textContent=b.name;$('status').textContent='等待选择设备';refreshVersion().catch(()=>{});}
 $('boardSelect').addEventListener('change',changeBoard);changeBoard();
 // Original ESP32 + USB UART: keep GPIO0 released and pulse EN through RTS.
@@ -50,13 +50,16 @@ $('flash').addEventListener('click',async()=>{
  try{
  const install=document.querySelector('input[name=mode]:checked').value==='install';
  const port=await navigator.serial.requestPort();
- status('下载并校验固件…');const manifest=await refreshVersion();log('固件 v'+manifest.version+' · 网页 20261113.2 · 波特率 115200');const board=BOARDS[boardId];const parts=selectedParts(manifest,install);
+ status('下载并校验固件…');const manifest=await refreshVersion();log('固件 v'+manifest.version+' · 网页 20261113.3 · 波特率 115200');const board=BOARDS[boardId];const parts=selectedParts(manifest,install);
  const expected=install?board.addresses:[board.app];if(JSON.stringify(parts.map(p=>p.address))!==JSON.stringify(expected))throw Error('固件清单分区不符合预期');
  const files=await Promise.all(parts.map(async p=>({address:p.address,data:await binary(p)})));
  const transport=new Transport(port,true);const loader=new ESPLoader({transport,baudrate:115200,terminal:{clean(){},write:log,writeLine:log},debugLogging:false});session={transport,loader,files,boardId,ready:false};status('正在连接 '+board.name+'…');await loader.main();if(loader.chip.CHIP_NAME!==board.chip)throw Error('芯片与所选硬件不符，已停止，未写入');
- if(!install){status('检查现有分区…');if(!validPartitions(await loader.readFlash(0x8000,0x1000),boardId))throw Error('分区不兼容，未写入。确认硬件和备份后可使用首次安装。');}
+ const detected=await loader.detectFlashSize();if(!detected||!/^\d+MB$/.test(detected)||parseInt(detected,10)<16)throw Error('本版需要至少 16MB Flash，检测到 '+(detected||'未知容量')+'，未写入');
+ let migrated=false;
+ if(!install){status('检查现有分区…');const plan=partitionPlan(await loader.readFlash(0x8000,0x1000),boardId);if(!plan)throw Error('分区不兼容，未写入。请备份并核对原固件布局。');if(plan==='migrate'){const table=manifest.parts.find(p=>p.address===0x8000);const data=await binary(table);if(partitionPlan(data,boardId)!=='current')throw Error('新相册分区校验失败，未写入');files.push({address:0x8000,data});migrated=true;}}
+
  session.ready=true;
- $('reviewText').textContent='固件 v'+manifest.version+' · '+board.name+' · '+(install?(boardId==='m5-fire'?'首次安装：将写入引导程序、分区表和应用；原固件数据不保证兼容。':'首次安装：将写入新分区和应用，清空新布局设置区，需重新配网与配置证书。'):'保留配置升级：仅写应用区，保留 Wi-Fi、密钥和证书。');
+ $('reviewText').textContent='固件 v'+manifest.version+' · '+board.name+' · '+(install?(boardId==='m5-fire'?'首次安装：将写入引导程序、分区表和应用；原固件数据不保证兼容。':'首次安装：将写入新分区和应用，清空新布局设置区，需重新配网与配置证书。'):(migrated?'保留配置升级：更新应用并新增相册分区，已有设置和数据分区位置不变。':'保留配置升级：仅写应用区，保留 Wi-Fi、密钥、证书和相册。'));
  $('review').hidden=false;status('检查通过，尚未写入。请核对信息后确认开始刷写。');
  }catch(e){status(e.name==='NotFoundError'?'已取消选择，未写入固件。':'准备失败，未写入：'+e.message);await release(true);}
  finally{busy=false;update();if(session?.ready)$('confirmFlash').focus();}

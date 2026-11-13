@@ -26,7 +26,11 @@ web-flasher/public/firmware/
 
 /build-xingzhi/
 /build-m5-regression/
-/ui-preview-firmware/sdkconfig.xingzhi
 /ui-preview-firmware/sdkconfig.xingzhi.old
 
 /build-profile-*/
+
+/ui-preview-firmware/managed_components/
+
+# Local device-debug notes are not release documentation.
+/docs/LOCAL_*.md

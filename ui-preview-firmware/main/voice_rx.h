@@ -26,4 +26,6 @@ static inline bool voice_rx_pop(voice_rx_t*q,uint8_t*out,uint16_t*n,int64_t*arri
 }
 // Wait for media duration, not a fixed packet count. Release early before a
 // full-size next packet would overflow, and never wait beyond 240ms.
-static inline bool voice_rx_prebuffer(const voice_rx_t*q,int64_t elapsed){return q->count&&elapsed<240000&&q->samples<1920&&q->count<VOICE_RX_SLOTS-1&&VOICE_RX_BYTES-q->used>=VOICE_RX_PACKET_MAX;}
+static inline bool voice_rx_prebuffer_for(const voice_rx_t*q,int64_t elapsed,unsigned ms){return q->count&&elapsed<(int64_t)ms*1000&&q->samples<ms*8&&q->count<VOICE_RX_SLOTS-1&&VOICE_RX_BYTES-q->used>=VOICE_RX_PACKET_MAX;}
+
+static inline bool voice_rx_prebuffer(const voice_rx_t*q,int64_t elapsed){return voice_rx_prebuffer_for(q,elapsed,240);}
