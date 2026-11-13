@@ -27,17 +27,17 @@ static void flush(void){
     sstv_decoder_feed(&d,block,used);used=0;
 }
 static void tone(float hz,int n){for(int i=0;i<n;i++){phase+=6.283185307179586*hz/8000;block[used++]=hz?(int16_t)(10000*sin(phase)):0;if(used==640)flush();}}
-static void header(unsigned code){tone(1900,2400);tone(1200,80);tone(1900,2400);tone(1200,240);for(unsigned b=0;b<8;b++)tone(code&(1u<<b)?1100:1300,240);tone(1200,240);}
+static void header(unsigned code){tone(1900,2400);tone(1200,80);tone(1900,2400);tone(1200,240);for(unsigned b=0;b<8;b++){tone(code&(1u<<b)?1100:1300,240);}tone(1200,240);}
 static void line(int row){tone(1200,72);tone(1500,24);tone(1500+126*800.0f/255,704);tone(row%2?2300:1500,36);tone(1900,12);tone(1500+128*800.0f/255,352);}
 static const int patches[6][3]={{235,128,128},{16,128,128},{81,90,240},{145,54,34},{41,240,110},{126,128,128}};
 static void color_line(int row){
     tone(1200,72);tone(1500,24);
-    for(int i=0;i<704;i++)tone(1500+patches[i*6/704][0]*800.0f/255,1);
+    for(int i=0;i<704;i++){tone(1500+patches[i*6/704][0]*800.0f/255,1);}
     tone(row%2?2300:1500,36);tone(1900,12);
-    for(int i=0;i<352;i++)tone(1500+patches[i*6/352][row%2?1:2]*800.0f/255,1);
+    for(int i=0;i<352;i++){tone(1500+patches[i*6/352][row%2?1:2]*800.0f/255,1);}
 }
 static void end(void){tone(0,640-used);flush();}
-static void picture(void){header(0x88);for(int r=0;r<240;r++)line(r);end();}
+static void picture(void){header(0x88);for(int r=0;r<240;r++){line(r);}end();}
 int main(void){
     int codecs=2;
 #ifdef FMO_FULL_SSTV
@@ -59,7 +59,7 @@ int main(void){
         sstv_decoder_break(&d);assert(d.status==SSTV_COMPLETE);assert(d.image[100]);
     }
     for(compressed=0;compressed<codecs;compressed++){
-        sstv_decoder_init(&d);header(0x88);for(int r=0;r<240;r++)color_line(r);end();
+        sstv_decoder_init(&d);header(0x88);for(int r=0;r<240;r++){color_line(r);}end();
         assert(d.status==SSTV_COMPLETE&&d.lines==240);
         for(int y=1;y<120;y++){
             unsigned white=pixel(13,y),black=pixel(40,y),red=pixel(66,y),green=pixel(93,y),blue=pixel(120,y);
@@ -71,9 +71,9 @@ int main(void){
         }
         printf("codec=%d color bars passed\n",compressed);
     }
-    compressed=0;sstv_decoder_init(&d);header(0x08);for(int r=0;r<4;r++)line(r);end();assert(d.status==SSTV_WAITING);
-    sstv_decoder_init(&d);header(0xac);for(int r=0;r<4;r++)line(r);end();assert(d.status==SSTV_WAITING);
-    sstv_decoder_init(&d);header(0x88);for(int r=0;r<4;r++)line(r);end();assert(d.lines==4);sstv_decoder_break(&d);assert(d.status==SSTV_INTERRUPTED);for(int r=4;r<10;r++)line(r);end();assert(d.lines==4);
+    compressed=0;sstv_decoder_init(&d);header(0x08);for(int r=0;r<4;r++){line(r);}end();assert(d.status==SSTV_WAITING);
+    sstv_decoder_init(&d);header(0xac);for(int r=0;r<4;r++){line(r);}end();assert(d.status==SSTV_WAITING);
+    sstv_decoder_init(&d);header(0x88);for(int r=0;r<4;r++){line(r);}end();assert(d.lines==4);sstv_decoder_break(&d);assert(d.status==SSTV_INTERRUPTED);for(int r=4;r<10;r++){line(r);}end();assert(d.lines==4);
     sstv_decoder_init(&d);header(0x88);line(0);tone(0,4000);end();assert(d.status==SSTV_INTERRUPTED);
     sstv_decoder_init(&d);for(int k=0;k<40;k++){tone(1900,800);tone(1200,80);tone(1300,800);}end();assert(d.status==SSTV_WAITING);
 #ifdef FMO_FULL_SSTV

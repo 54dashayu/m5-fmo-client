@@ -29,7 +29,7 @@ static uint16_t lv_color_make(unsigned r,unsigned g,unsigned b){return (r>>3)<<1
 static void lv_draw_img(lv_draw_ctx_t*c,lv_draw_img_dsc_t*s,lv_area_t*b,const lv_img_dsc_t*i){(void)s;assert(i->header.w==240&&i->header.h==1&&i->data_size==480);assert(b->y1>=c->clip_area->y1&&b->y2<=c->clip_area->y2);memcpy(rendered+(b->y1-30)*240,i->data,480);rows++;}
 '''
 tail=r'''
-int main(void){for(unsigned i=0;i<sizeof(pixels);i++)pixels[i]=i*37;
+int main(void){for(unsigned i=0;i<sizeof(pixels);i++){pixels[i]=i*37;}
 image_draw(NULL);assert(rows==180);for(unsigned y=0;y<180;y++)for(unsigned x=0;x<240;x++){uint8_t v=pixels[(y*90/180)*120+x*120/240];assert(rendered[y*240+x]==lv_color_make((v>>5)*255/7,((v>>2)&7)*255/7,(v&3)*255/3));}
 clip.y1=69;clip.y2=76;rows=0;image_draw(NULL);assert(rows==8);
 puts("PASS M5 row rendering: 240x180 scaling, all rows present and clipped redraw only");}

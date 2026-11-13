@@ -82,7 +82,7 @@ assert(decoder->status==SSTV_INTERRUPTED);
 #endif
 sstv_rx_feed(pcm,640,1,2,3);assert(!queue->count);
 old=atomic_load(&session);assert(sstv_rx_enable(true));assert(atomic_load(&session)>old&&decoder->status==SSTV_WAITING);assert(!sstv_rx_save(&id));
-for(int i=0;i<4;i++)sstv_rx_feed(pcm,640,1,2,3);
+for(int i=0;i<4;i++){sstv_rx_feed(pcm,640,1,2,3);}
 run_worker=1;if(!setjmp(worker_done))worker(NULL);
 assert(diagnostics.samples==2560&&diagnostics.stream_breaks==0);
 // Delayed queued PCM survives jitter; explicit loss and timeout do not.
