@@ -24,7 +24,8 @@ tail=r'''
 int main(void){memset(buffer,0xa5,sizeof(buffer));for(int i=0;i<SSTV_PIXELS;i++){unsigned v=(i*73+19)&65535;buffer[i*2]=v;buffer[i*2+1]=v>>8;}image_changed();
 for(int y=0;y<180;y++)for(int x=0;x<240;x++){unsigned at=(y*240/180)*320+x*320/240,v=(at*73+19)&65535;unsigned r=((v>>11)&31)*255/31,g=((v>>5)&63)*255/63,b=(v&31)*255/31;assert(image_display[y*240+x].full==((r>>3)<<11|(g>>2)<<5|(b>>3)));}
 for(int i=0;i<SSTV_PIXELS;i++){unsigned v=(i*73+19)&65535;assert(buffer[i*2]==(v&255)&&buffer[i*2+1]==v>>8);}
-for(unsigned i=SSTV_PIXELS*2;i<sizeof(buffer);i++)assert(buffer[i]==0xa5);assert(invalidated==1);puts("PASS 240x180 separate preview: correct full-frame sampling, unchanged source and guard");}
+for(unsigned i=SSTV_PIXELS*2;i<sizeof(buffer);i++){assert(buffer[i]==0xa5);}
+assert(invalidated==1);puts("PASS 240x180 separate preview: correct full-frame sampling, unchanged source and guard");}
 '''
 with tempfile.TemporaryDirectory() as td:
  p=Path(td)/'p.c';p.write_text(pre+fn+tail);subprocess.run(['cc','-DFMO_FULL_SSTV','-Wall','-Wextra','-Werror',str(p),'-o',td+'/test'],check=True);subprocess.run([td+'/test'],check=True)
