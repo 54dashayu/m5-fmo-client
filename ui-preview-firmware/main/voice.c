@@ -32,7 +32,7 @@ _Static_assert(pdMS_TO_TICKS(5)>0,"S3 audio polling must block at least one sche
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/time.h>
-typedef struct{uint16_t n;int64_t arrival;uint8_t data[1400];} packet_t;
+typedef struct{uint16_t n;int64_t arrival;uint8_t data[VOICE_RX_PACKET_MAX];} packet_t;
 static voice_view_t state={.volume=25};static portMUX_TYPE mux=portMUX_INITIALIZER_UNLOCKED;static voice_rx_t rx_buffer;static SemaphoreHandle_t qlock;static nvs_handle_t nv;static voice_publish_t publish_packet;
 static TaskHandle_t audio_handle;
 #ifndef CONFIG_FMO_BOARD_XINGZHI
@@ -60,9 +60,11 @@ void voice_volume(int d){portENTER_CRITICAL(&mux);int n=state.volume+d;state.vol
 void voice_mute(void){portENTER_CRITICAL(&mux);state.muted=!state.muted;int m=state.muted;portEXIT_CRITICAL(&mux);nvs_set_u8(nv,"mute",m);nvs_commit(nv);}
 void voice_mic_test(bool on){portENTER_CRITICAL(&mux);test_requested=on;requested=false;portEXIT_CRITICAL(&mux);}
 void voice_tone(void){if(!voice_busy()){portENTER_CRITICAL(&mux);tone_requested=true;portEXIT_CRITICAL(&mux);}}
-void voice_receive(const uint8_t*p,size_t n){voice_packet_t v;if(!qlock||!voice_parse(p,n,&v))return;portENTER_CRITICAL(&mux);bool drop=v.uid==uid||state.tx||test_requested;portEXIT_CRITICAL(&mux);if(drop)return;
+void voice_reject_oversized(size_t n){portENTER_CRITICAL(&mux);state.rx_oversized++;if(n>state.rx_max_bytes)state.rx_max_bytes=n;portEXIT_CRITICAL(&mux);}
+void voice_receive(const uint8_t*p,size_t n){if(!qlock)return;voice_packet_t v;bool valid=voice_parse(p,n,&v);portENTER_CRITICAL(&mux);if(n>state.rx_max_bytes)state.rx_max_bytes=n;if(!valid)state.rx_rejected++;else if((unsigned)v.count>state.rx_max_frames)state.rx_max_frames=v.count;portEXIT_CRITICAL(&mux);if(!valid)return;portENTER_CRITICAL(&mux);bool drop=v.uid==uid||state.tx||test_requested;portEXIT_CRITICAL(&mux);if(drop)return;
  unsigned samples=0;for(int i=0;i<v.count;i++){int frame=v.mode[i]==2?640:opus_packet_get_nb_samples(v.raw[i],v.len[i],8000);if(frame>0&&frame<=640)samples+=frame;}
  int64_t now=esp_timer_get_time();xSemaphoreTake(qlock,portMAX_DELAY);int lost=voice_rx_push(&rx_buffer,p,n,samples,now);xSemaphoreGive(qlock);
+ if(lost<0){portENTER_CRITICAL(&mux);state.rx_rejected++;portEXIT_CRITICAL(&mux);return;}
  portENTER_CRITICAL(&mux);if(lost>0){state.dropped+=lost;state.rx_overflow+=lost;
 rx_loss_epoch++;
 }if(now>=rx_until||strcmp(state.caller,v.call)){call_history_push(state.last_caller,state.previous_caller,state.caller);rx_first_arrival=now;}rx_until=now+700000;snprintf(state.caller,sizeof(state.caller),"%s",v.call);state.rx_packets++;portEXIT_CRITICAL(&mux);}
@@ -189,9 +191,21 @@ portEXIT_CRITICAL(&mux);
   if(tone){if(audio_mode(false)!=ESP_OK){notice("音频切换失败，请重启");continue;}for(int b=0;b<20;b++){for(int i=0;i<160;i++)pcm[i]=(i%10<5)?1800:-1800;play(pcm,160);}play(NULL,640);silence_until=esp_timer_get_time()+2000000;continue;}
   portENTER_CRITICAL(&mux);int64_t first_arrival=rx_first_arrival;portEXIT_CRITICAL(&mux);
   unsigned buffer_ms=240;
+#ifndef CONFIG_FMO_BOARD_XINGZHI
+  buffer_ms=480;
+#endif
   if(sstv_rx_active())buffer_ms=480;
-  xSemaphoreTake(qlock,portMAX_DELAY);bool pending_audio=rx_buffer.count>0;bool buffering=voice_rx_prebuffer_for(&rx_buffer,esp_timer_get_time()-first_arrival,buffer_ms);xSemaphoreGive(qlock);
+  xSemaphoreTake(qlock,portMAX_DELAY);bool pending_audio=rx_buffer.count>0;bool buffering=voice_rx_playback_prebuffer(&rx_buffer,esp_timer_get_time()-first_arrival,buffer_ms);xSemaphoreGive(qlock);
   if(buffered_session!=first_arrival&&buffering){if(mode==0)play(NULL,160);else vTaskDelay(pdMS_TO_TICKS(5));continue;}
+#ifndef CONFIG_FMO_BOARD_XINGZHI
+  if(underrun&&pending_audio){
+   xSemaphoreTake(qlock,portMAX_DELAY);
+   bool refill=voice_rx_playback_prebuffer(&rx_buffer,esp_timer_get_time()-rx_buffer.entries[rx_buffer.head].arrival,buffer_ms);
+   xSemaphoreGive(qlock);
+   if(refill){if(mode==0)play(NULL,160);else vTaskDelay(pdMS_TO_TICKS(5));continue;}
+   portENTER_CRITICAL(&mux);state.rx_rebuffers++;portEXIT_CRITICAL(&mux);
+  }
+#endif
   if(pending_audio)buffered_session=first_arrival;
   // Six playback blocks provide 120ms total DMA capacity; ADC stays at four.
   // Allow one bounded 40ms packet wait before inserting silence; once empty,
@@ -201,7 +215,7 @@ portEXIT_CRITICAL(&mux);
   * deliver the next packet late. SSTV keeps its bounded timeout;
   * overflow, stale packets, decode errors and connection changes still
   * invalidate it explicitly. Do not inject playback silence into SSTV. */
- portENTER_CRITICAL(&mux);state.rx_underflows++;portEXIT_CRITICAL(&mux);underrun=true;}if(mode==0&&esp_timer_get_time()<silence_until)play(NULL,160);else{audio_stop();vTaskDelay(pdMS_TO_TICKS(10));}continue;}if(esp_timer_get_time()-packet.arrival>1000000){sstv_rx_break();portENTER_CRITICAL(&mux);state.dropped++;state.rx_late++;portEXIT_CRITICAL(&mux);continue;}
+ portENTER_CRITICAL(&mux);state.rx_underflows++;portEXIT_CRITICAL(&mux);underrun=true;}if(mode==0&&esp_timer_get_time()<silence_until)play(NULL,160);else{audio_stop();vTaskDelay(pdMS_TO_TICKS(10));}continue;}if(esp_timer_get_time()-packet.arrival>VOICE_RX_STALE_US){sstv_rx_break();portENTER_CRITICAL(&mux);state.dropped++;state.rx_late++;portEXIT_CRITICAL(&mux);continue;}
   underrun=false;voice_packet_t v;if(!voice_parse(packet.data,packet.n,&v))continue;if(audio_mode(false)!=ESP_OK){notice("音频切换失败，请重启");continue;}uint32_t payload_crc=(uint32_t)packet.data[36]|((uint32_t)packet.data[37]<<8)|((uint32_t)packet.data[38]<<16)|((uint32_t)packet.data[39]<<24);bool shared_stamp=false;
  if(voice_duplicate(&duplicate_state,v.uid,v.base,v.timestamp,payload_crc,packet.n,&shared_stamp)){portENTER_CRITICAL(&mux);state.rx_duplicates++;portEXIT_CRITICAL(&mux);continue;}
  if(shared_stamp){portENTER_CRITICAL(&mux);state.rx_shared_timestamps++;portEXIT_CRITICAL(&mux);}

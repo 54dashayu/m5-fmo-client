@@ -13,7 +13,7 @@
 #else
 #define FMO_BOARD_ID "m5-fire"
 #define FMO_BOARD_TITLE "FMO / M5"
-#define FMO_VERSION "0.7.64"
+#define FMO_VERSION "0.7.66"
 #define FMO_HAS_SIDE_LEDS 1
 #define FMO_WIDTH 320
 #define FMO_KEY_A 39

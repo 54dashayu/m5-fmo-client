@@ -2,11 +2,12 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
-// Store only received bytes: short Opus packets must not occupy 1400-byte slots.
+#include "voice_wire.h"
+// Store only received bytes: short Opus packets must not occupy maximum-size slots.
 // Fixed allocation remains below the former four full packet slots.
 #define VOICE_RX_BYTES 5120
 #define VOICE_RX_SLOTS 24
-#define VOICE_RX_PACKET_MAX 1400
+#define VOICE_RX_PACKET_MAX VOICE_WIRE_PACKET_MAX
 typedef struct {uint16_t offset,n,samples;int64_t arrival;} voice_rx_entry_t;
 typedef struct {uint8_t bytes[VOICE_RX_BYTES];voice_rx_entry_t entries[VOICE_RX_SLOTS];unsigned head,count,write,used,samples;} voice_rx_t;
 static inline void voice_rx_clear(voice_rx_t*q){q->head=q->count=q->write=q->used=q->samples=0;}
@@ -25,7 +26,20 @@ static inline bool voice_rx_pop(voice_rx_t*q,uint8_t*out,uint16_t*n,int64_t*arri
  memcpy(out,q->bytes+e.offset,first);memcpy(out+first,q->bytes,e.n-first);*n=e.n;*arrival=e.arrival;voice_rx_drop(q);return true;
 }
 // Wait for media duration, not a fixed packet count. Release early before a
-// full-size next packet would overflow, and never wait beyond 240ms.
+// full-size next packet would overflow, and bound the wait by the chosen window.
 static inline bool voice_rx_prebuffer_for(const voice_rx_t*q,int64_t elapsed,unsigned ms){return q->count&&elapsed<(int64_t)ms*1000&&q->samples<ms*8&&q->count<VOICE_RX_SLOTS-1&&VOICE_RX_BYTES-q->used>=VOICE_RX_PACKET_MAX;}
 
 static inline bool voice_rx_prebuffer(const voice_rx_t*q,int64_t elapsed){return voice_rx_prebuffer_for(q,elapsed,240);}
+
+// One aggregated packet is not a jitter cushion: it can contain all the media
+// until the next network delivery. Wait for a second packet or the deadline.
+static inline bool voice_rx_jitter_prebuffer(const voice_rx_t*q,int64_t elapsed,unsigned ms){
+ return q->count&&elapsed<(int64_t)ms*1000&&(q->count<2||q->samples<ms*8)&&q->count<VOICE_RX_SLOTS-1&&VOICE_RX_BYTES-q->used>=VOICE_RX_PACKET_MAX;
+}
+#ifdef CONFIG_FMO_BOARD_XINGZHI
+#define voice_rx_playback_prebuffer voice_rx_prebuffer_for
+#define VOICE_RX_STALE_US 1000000
+#else
+#define voice_rx_playback_prebuffer voice_rx_jitter_prebuffer
+#define VOICE_RX_STALE_US 2000000
+#endif

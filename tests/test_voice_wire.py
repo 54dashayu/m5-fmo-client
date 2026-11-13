@@ -20,7 +20,7 @@ for i in range(3):
 out=C.create_string_buffer(1400);n=c.voice_pack(out,1400,b''.join(frames),3,17910101,b'BH1JSS',1791,1000,1000,1);assert n==1096
 assert c.voice_pack(out,1400,b''.join(frames),3,17910101,b'BH1JSS',1791,1000,1240,4)==1096
 assert [struct.unpack_from('<H',out.raw,64+i*344)[0] for i in range(3)]==[1,2,3]
-packet=out.raw[:n];assert struct.unpack_from('<I',packet,36)[0]==zlib.crc32(packet[64:]);parsed=C.create_string_buffer(256);assert c.voice_parse(packet,n,parsed)
+packet=out.raw[:n];assert struct.unpack_from('<I',packet,36)[0]==zlib.crc32(packet[64:]);parsed=C.create_string_buffer(4096);assert c.voice_parse(packet,n,parsed)
 for cut in range(n):assert not c.voice_parse(packet,cut,parsed)
 for pos in (0,30,34,36,80,1095):
  bad=bytearray(packet);bad[pos]^=128;assert not c.voice_parse(bytes(bad),len(bad),parsed)
@@ -60,3 +60,12 @@ for number in range(140):
  assert peer_state==encoder_state
  last_frame=fi
 print('PASS: 140-frame stateful peer decoding, dropped-frame recovery and uint16 wrap match independent IMA')
+# Compatibility: peer packets can have more than six frames or exceed 1400 bytes.
+def peer_packet(count, payload_bytes):
+ body=b''.join(struct.pack('<HHI',i+1,16+payload_bytes,0)+struct.pack('<BH5x',1,8+payload_bytes)+bytes([i%255+1])*payload_bytes for i in range(count))
+ packet=bytearray(op[:64]+body);struct.pack_into('<IH',packet,30,len(packet),count);struct.pack_into('<I',packet,36,zlib.crc32(body));return bytes(packet)
+for count,size in [(7,3),(10,80),(6,300),(116,1)]:
+ packet=peer_packet(count,size);assert len(packet)<=2048;assert c.voice_parse(packet,len(packet),parsed),(count,size)
+for count,size in [(117,1),(6,320)]:
+ packet=peer_packet(count,size);assert not c.voice_parse(packet,len(packet),parsed)
+print('PASS: bounded peer batches over six frames / 1400 bytes; rejects over 2048 bytes')
