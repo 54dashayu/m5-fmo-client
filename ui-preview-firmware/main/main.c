@@ -34,7 +34,7 @@ static lv_obj_t *home,*battery_label,*battery_fill,*local_call,*net,*caption,*ba
 static buttons_t keys;
 static uint8_t rotation;
 static bool breathing=true,ptt_latch=true;
-bool ui_flashing_enabled=true;unsigned ui_call_rgb=0xffd166,ui_call_opacity=255;
+bool ui_flashing_enabled=!FMO_HAS_SIDE_LEDS;unsigned ui_call_rgb=0xffd166,ui_call_opacity=255;
 static nvs_handle_t ui_nv;
 static bool ui_nv_ready;
 static int shown=-1;
@@ -45,11 +45,11 @@ static void create_ui(void);
 static bool save_settings(uint8_t rot,bool pulse,bool latch){
  uint32_t packed=rot|(pulse?4:0)|(latch?8:0);
  if(!ui_nv_ready||nvs_set_u32(ui_nv,"options",packed)!=ESP_OK||nvs_commit(ui_nv)!=ESP_OK){snprintf(settings_notice,sizeof(settings_notice),"设置保存失败，请重试");return false;}
- rotation=rot;breathing=pulse;ui_flashing_enabled=pulse;ptt_latch=latch;settings_notice[0]=0;return true;
+ rotation=rot;breathing=pulse;ui_flashing_enabled=call_flashing_enabled(FMO_HAS_SIDE_LEDS,pulse);ptt_latch=latch;settings_notice[0]=0;return true;
 }
 static void load_settings(void){
  ui_nv_ready=nvs_open("fmo_ui",NVS_READWRITE,&ui_nv)==ESP_OK;
- uint32_t packed=12;if(ui_nv_ready&&nvs_get_u32(ui_nv,"options",&packed)==ESP_OK&&packed<=15){rotation=packed&3;breathing=packed&4;ptt_latch=packed&8;ui_flashing_enabled=breathing;}
+ uint32_t packed=12;if(ui_nv_ready&&nvs_get_u32(ui_nv,"options",&packed)==ESP_OK&&packed<=15){rotation=packed&3;breathing=packed&4;ptt_latch=packed&8;ui_flashing_enabled=call_flashing_enabled(FMO_HAS_SIDE_LEDS,breathing);}
 }
 
 static display_idle_t display_idle;
@@ -141,14 +141,16 @@ static void refresh_home(const device_view_t*v,const voice_view_t*a,const relay_
  lv_obj_set_style_text_font(call_label,pending_clock?&font20:idle?&ui_clock:&ui_call,0);
  lv_obj_set_y(call_label,FMO_WIDTH==240?55:64);if(FMO_WIDTH==240&&idle&&!pending_clock)lv_obj_set_style_text_font(call_label,&ui_call,0);
  lv_label_set_long_mode(call_label,LV_LABEL_LONG_SCROLL_CIRCULAR);
- call_indicator_t signal=call_indicator(a->tx,a->rx,breathing,esp_timer_get_time()/1000);
+ call_indicator_t signal=call_indicator(a->tx,a->rx,ui_flashing_enabled,esp_timer_get_time()/1000);
  ui_call_rgb=signal.color;ui_call_opacity=signal.opacity;
  lv_obj_set_style_text_color(call_label,lv_color_hex(signal.color),0);
- lv_obj_set_style_text_opa(call_label,signal.opacity,0);
+ lv_obj_set_style_text_opa(call_label,255,0);
+ if(signal.opacity)lv_obj_clear_flag(call_label,LV_OBJ_FLAG_HIDDEN);else lv_obj_add_flag(call_label,LV_OBJ_FLAG_HIDDEN);
  // Header callsign also signals TX; the central remote callsign signals RX.
  lv_obj_set_style_text_color(local_call,lv_color_hex(a->tx?signal.color:0x7ec9ff),0);
- lv_obj_set_style_text_opa(local_call,a->tx?signal.opacity:255,0);
- lv_obj_set_style_text_opa(badge,(a->tx||a->rx)?signal.opacity:255,0);
+ lv_obj_set_style_text_opa(local_call,255,0);
+ if(a->tx&&!signal.opacity)lv_obj_add_flag(local_call,LV_OBJ_FLAG_HIDDEN);else lv_obj_clear_flag(local_call,LV_OBJ_FLAG_HIDDEN);
+ lv_obj_set_style_text_opa(badge,255,0);
 
  if(a->tx)lv_label_set_text(hint,ptt_latch?"再次短按 B 停止":"松开 B 停止");else lv_label_set_text(hint,idle?"":a->rx?"接收中":v->mqtt_online?"守听中":"中继断开");
  lv_label_set_text(last_call,a->last_caller[0]?a->last_caller:"--");
@@ -169,7 +171,7 @@ static void key(int k,key_action_t action,void*ctx){(void)ctx;ui_key_events++;ui
  if(page==SETTINGS){
  if(k==0){selection=(selection+2)%3;}if(k==2)selection=(selection+1)%3;
  if(k==1){voice_ptt(false);if(selection==0){if(save_settings((rotation+1)%4,breathing,ptt_latch)){lv_disp_set_rotation(NULL,(lv_disp_rot_t)rotation);create_ui();}}
- else if(selection==1)save_settings(rotation,!breathing,ptt_latch);
+ else if(selection==1){if(FMO_HAS_SIDE_LEDS)save_settings(rotation,!breathing,ptt_latch);else snprintf(settings_notice,sizeof(settings_notice),"本机无灯条，使用呼号闪烁");}
  else if(save_settings(rotation,breathing,!ptt_latch))buttons_set_momentary(&keys,!ptt_latch);}
  return;}
  if(page==RELAYS){int n=relays_count(),pos=relays_order_position(selection);if(k==0){pos=(pos+n)%(n+1);selection=pos==n?-1:relays_order_at(pos);}if(k==2){pos=(pos+1)%(n+1);selection=pos==n?-1:relays_order_at(pos);}if(k==1){if(selection<0)go(DISCOVER);else if(device_select_relay(selection))go(HOME);}return;}
@@ -198,7 +200,7 @@ static void refresh(void){
  }else if(page==DISCOVER){relay_t fresh[DISCOVERY_MAX];uint32_t rev;int num=discovery_list(fresh,&rev);if(rev!=discovered_revision||num!=discovered_count){relay_t old={0};bool was_refresh=selection==discovered_count;if(selection<discovered_count)old=discovered_ui[selection];memcpy(discovered_ui,fresh,num*sizeof(relay_t));discovered_count=num;discovered_revision=rev;discovery_notice[0]=0;selection=was_refresh?num:0;for(int i=0;!was_refresh&&i<num;i++)if(fresh[i].uid==old.uid&&!strcmp(fresh[i].fingerprint,old.fingerprint))selection=i;}int total=discovered_count+1,start=selection/4*4;lv_label_set_text_fmt(title,"发现中继 %d/%d",selection/4+1,(total+3)/4);for(int i=0;i<4;i++){int p=start+i;if(p>=total)lv_label_set_text(lines[i],"");else if(p==discovered_count)lv_label_set_text_fmt(lines[i],"%s 刷新列表",selection==p?">":" ");else{char name[65];name_for_display(name,sizeof(name),discovered_ui[p].name,relay_glyph);lv_label_set_text_fmt(lines[i],"%s %s",selection==p?">":" ",name);}}char progress[96];discovery_status(progress,sizeof(progress));lv_label_set_text(lines[4],discovery_notice[0]?discovery_notice:progress);lv_label_set_text(footer,"A 上项  B 选择  C 下项 / 长按A返回");
  }else if(page==SETTINGS){lv_label_set_text(title,"显示与按键");
  lv_label_set_text_fmt(lines[0],"%s 屏幕翻转：%d 度",selection==0?">":" ",rotation*90);
- lv_label_set_text_fmt(lines[1],"%s 呼吸灯：%s",selection==1?">":" ",breathing?"开启":"关闭");
+ lv_label_set_text_fmt(lines[1],"%s 收发提示：%s",selection==1?">":" ",FMO_HAS_SIDE_LEDS&&breathing?"呼吸灯":"呼号闪烁");
  lv_label_set_text_fmt(lines[2],"%s PTT 保持：%s",selection==2?">":" ",ptt_latch?"开启":"关闭");
  lv_label_set_text(lines[3],ptt_latch?"短按 B 开始，再按停止":"按住 B 发话，松开停止");lv_label_set_text(lines[4],settings_notice);
  lv_label_set_text(footer,"A 上项 B 更改 C 下项 / 长按A返回");
@@ -251,5 +253,5 @@ void app_main(void){
  if(result!=ESP_OK){lv_label_set_text(title,"USB 后台启动失败");ESP_LOGE("main","init: %s",esp_err_to_name(result));}
  if(result==ESP_OK){load_settings();lv_disp_set_rotation(NULL,(lv_disp_rot_t)rotation);create_ui();}
  int pins[3]={FMO_KEY_A,FMO_KEY_B,FMO_KEY_C};uint8_t initial=0;for(int i=0;i<3;i++)if(!gpio_get_level(pins[i]))initial|=1<<i;buttons_init(&keys,initial,key,NULL);buttons_set_momentary(&keys,!ptt_latch);int64_t updated=0,led_updated=0;
- while(1){int64_t now=esp_timer_get_time();uint8_t pressed=0;for(int i=0;i<3;i++)if(!gpio_get_level(pins[i]))pressed|=1<<i;if(result==ESP_OK){if(now-led_updated>=25000){voice_view_t led_voice;voice_view(&led_voice);side_leds_update(breathing&&led_voice.tx,breathing&&led_voice.rx,now/1000);unsigned brightness=display_idle_step(&display_idle,now/1000,led_voice.tx||led_voice.rx||pressed);ui_idle_seconds=(now/1000-display_idle.last_activity)/1000;ui_pressed_mask=pressed;if(brightness!=ui_backlight_percent){disp_driver_set_brightness(brightness);ui_backlight_percent=brightness;}led_updated=now;}buttons_step(&keys,pressed,now/1000,page==HOME);if(now-updated>150000){refresh();updated=now;}}lv_timer_handler();vTaskDelay(pdMS_TO_TICKS(10));}
+ while(1){int64_t now=esp_timer_get_time();uint8_t pressed=0;for(int i=0;i<3;i++)if(!gpio_get_level(pins[i]))pressed|=1<<i;if(result==ESP_OK){if(now-led_updated>=25000){voice_view_t led_voice;voice_view(&led_voice);side_leds_update(FMO_HAS_SIDE_LEDS&&breathing&&led_voice.tx,FMO_HAS_SIDE_LEDS&&breathing&&led_voice.rx,now/1000);unsigned brightness=display_idle_step(&display_idle,now/1000,led_voice.tx||led_voice.rx||pressed);ui_idle_seconds=(now/1000-display_idle.last_activity)/1000;ui_pressed_mask=pressed;if(brightness!=ui_backlight_percent){disp_driver_set_brightness(brightness);ui_backlight_percent=brightness;}led_updated=now;}buttons_step(&keys,pressed,now/1000,page==HOME);if(now-updated>150000){refresh();updated=now;}}lv_timer_handler();vTaskDelay(pdMS_TO_TICKS(10));}
 }

@@ -6,7 +6,8 @@
 #ifdef CONFIG_FMO_BOARD_XINGZHI
 #define FMO_BOARD_ID "xingzhi-cube-1.54tft-wifi"
 #define FMO_BOARD_TITLE "FMO / S3"
-#define FMO_VERSION "0.7.32"
+#define FMO_VERSION "0.7.33"
+#define FMO_HAS_SIDE_LEDS 0
 #define FMO_WIDTH 240
 #define FMO_LCD_MOSI 10
 #define FMO_LCD_SCLK 9
@@ -29,7 +30,8 @@
 #else
 #define FMO_BOARD_ID "m5-fire"
 #define FMO_BOARD_TITLE "FMO / M5"
-#define FMO_VERSION "0.7.32"
+#define FMO_VERSION "0.7.33"
+#define FMO_HAS_SIDE_LEDS 1
 #define FMO_WIDTH 320
 #define FMO_KEY_A 39
 #define FMO_KEY_B 38
