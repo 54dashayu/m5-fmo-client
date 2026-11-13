@@ -82,7 +82,7 @@ static void set_text(lv_obj_t*o,const char*s){
  char mapped[256];snprintf(mapped,sizeof(mapped),"%s",s);
  // Existing UI hints describe logical A/B/C roles, translate to physical keys.
  // The scheme selector itself deliberately shows physical A/B/C unchanged.
- if(page!=KEY_LAYOUT&&(o==footer||o==hint||o==b_hint||o==a_hint||o==c_hint||(page==SETTINGS&&o==lines[3])||(page==CA_CONFIRM&&!ca_submitted&&o==lines[4])))for(char*p=mapped;*p;p++)if(*p>='A'&&*p<='C'&&(p==mapped||p[-1]==' '||p[-1]=='/'||(unsigned char)p[-1]>=128)&&(p[1]==' '||p[1]=='/'||(unsigned char)p[1]>=128))*p=key_layout_letter(ui_key_layout,*p-'A');
+ if(page!=KEY_LAYOUT&&(o==footer||o==hint||((page==SETTINGS||page==IDENTITY||page==MIC)&&o==lines[3])||(page==CA_CONFIRM&&!ca_submitted&&o==lines[4])))for(char*p=mapped;*p;p++)if(*p>='A'&&*p<='C'&&(p==mapped||p[-1]==' '||p[-1]=='/'||(unsigned char)p[-1]>=128)&&(p[1]==' '||p[1]=='/'||(unsigned char)p[1]>=128))*p=key_layout_letter(ui_key_layout,*p-'A');
  if(strcmp(lv_label_get_text(o),mapped))lv_label_set_text(o,mapped);
 }
 static void set_text_fmt(lv_obj_t*o,const char*fmt,...){char text[256];va_list args;va_start(args,fmt);vsnprintf(text,sizeof(text),fmt,args);va_end(args);set_text(o,text);}
@@ -142,7 +142,15 @@ static void build_home(void){
  build_compact_home();
 }
 static void refresh_home(const device_view_t*v,const voice_view_t*a,const relay_t*r){
- lv_label_set_text(a_hint,"A 音量-");lv_label_set_text(c_hint,"C 音量+");
+ lv_obj_t*key_hints[]={a_hint,b_hint,c_hint};
+ for(unsigned i=0;i<3;i++){
+  unsigned role=key_layouts[ui_key_layout<KEY_LAYOUT_COUNT?ui_key_layout:0][i];
+  lv_label_set_text_fmt(key_hints[i],"%c %s",'A'+i,key_layout_caption(ui_key_layout,i,ptt_latch,a->tx));
+  int width=lv_disp_get_hor_res(NULL)/3;
+  lv_obj_set_x(key_hints[i],i*width);lv_obj_set_width(key_hints[i],width);
+  lv_obj_set_style_text_align(key_hints[i],LV_TEXT_ALIGN_CENTER,0);
+  lv_obj_set_style_text_color(key_hints[i],lv_color_hex(role==1?0x58d6b2:0xd4e4eb),0);
+ }
  uint32_t accent=a->tx?0xff3030:a->rx?0x20ff70:v->mqtt_online?0x58d6b2:0xa8b5bf;
  uint32_t tint=a->tx?0x441818:a->rx?0x123d25:v->mqtt_online?0x12352f:0x263139;
  int percent;bool charging;battery_view(&percent,&charging);if(percent<0)lv_label_set_text(battery_label,"--");else lv_label_set_text_fmt(battery_label,"%d%%%s",percent,charging?"+":"");if(percent<=0)lv_obj_add_flag(battery_fill,LV_OBJ_FLAG_HIDDEN);else{lv_obj_clear_flag(battery_fill,LV_OBJ_FLAG_HIDDEN);lv_obj_set_width(battery_fill,(18*percent+99)/100);}lv_obj_set_style_bg_color(battery_fill,lv_color_hex(charging?0x5ceaff:percent<=25?0xff7766:0x58d6b2),0);
@@ -178,7 +186,7 @@ static void refresh_home(const device_view_t*v,const voice_view_t*a,const relay_
  lv_label_set_text(last_call,a->last_caller[0]?a->last_caller:"--");
  lv_label_set_text(previous_call,a->previous_caller[0]?a->previous_caller:"--");
  char name[65];name_for_display(name,sizeof(name),r->name[0]?r->name:r->call,relay_glyph);lv_label_set_text(relay_name,name);lv_label_set_text_fmt(relay_id,"%lu",(unsigned long)r->uid);
- if(a->muted)lv_label_set_text_fmt(home_notice,"%s · 静音",a->notice[0]?a->notice:"守听中");else lv_label_set_text_fmt(home_notice,"%s · 音量 %d%%",a->notice[0]?a->notice:"守听中",a->volume);lv_label_set_text(b_hint,ptt_latch?(a->tx?"B  停止发话":"B  开始发话"):"B 按住发话");lv_obj_set_style_text_color(b_hint,lv_color_hex(accent),0);
+ if(a->muted)lv_label_set_text_fmt(home_notice,"%s · 静音",a->notice[0]?a->notice:"守听中");else lv_label_set_text_fmt(home_notice,"%s · 音量 %d%%",a->notice[0]?a->notice:"守听中",a->volume);for(unsigned i=0;i<3;i++)if(key_layout_letter(ui_key_layout,1)=='A'+i)lv_obj_set_style_text_color(key_hints[i],lv_color_hex(accent),0);
  int peak=a->tx?a->mic_peak:a->rx?a->speaker_peak:0;int level=peak/1800;if(level>9)level=9;
  for(int i=0;i<9;i++){int h=i<level?5+(i%3)*4:3;lv_obj_set_pos(bars[i],(FMO_WIDTH==240?180:247)+i*5,(FMO_WIDTH==240?113:119)-h);lv_obj_set_height(bars[i],h);lv_obj_set_style_bg_color(bars[i],lv_color_hex(i<level?accent:0x35505f),0);}
 }

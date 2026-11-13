@@ -13,3 +13,13 @@ static inline char key_layout_letter(unsigned scheme,unsigned role){
  for(unsigned i=0;i<3;i++)if(key_layouts[scheme][i]==role)return 'A'+i;
  return '?';
 }
+
+// Captions are indexed by physical position, matching the input mapping.
+static inline const char*key_layout_caption(unsigned scheme,unsigned physical,int latch,int tx){
+ if(scheme>=KEY_LAYOUT_COUNT)scheme=0;
+ if(physical>=3)return "";
+ unsigned role=key_layouts[scheme][physical];
+ if(role==0)return "音量-";
+ if(role==2)return "音量+";
+ return latch?(tx?"停止发话":"开始发话"):"按住发话";
+}
