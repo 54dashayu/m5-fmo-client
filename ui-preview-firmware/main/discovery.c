@@ -1,5 +1,6 @@
 #include "discovery.h"
 #include "voice.h"
+#include "device_web.h"
 #include "cert_wire.h"
 #include "utf8_name.h"
 #include "esp_http_client.h"
@@ -20,7 +21,7 @@
 #include <time.h>
 #include <math.h>
 
-typedef struct {relay_t relay;time_t verified,attempted,seen;bool mutual;} candidate_t;
+typedef struct {relay_t relay;time_t verified,attempted,seen;bool mutual;char accepted[10][44];int accepted_count;time_t accepted_until;} candidate_t;
 static candidate_t rows[DISCOVERY_MAX];
 static uint32_t checking_uid;
 static int count;static uint32_t revision=1;static time_t updated;
@@ -65,7 +66,10 @@ static bool fetch_catalog(void){
  char active_root[44]={0},owner_now[65],call_now[8];uint32_t uid_now;
  if(ok)ok=identity(NULL,NULL,call_now,&uid_now,owner_now,active_root);
  candidate_t*next=calloc(DISCOVERY_MAX,sizeof(candidate_t));if(!next)ok=false;int n=0;
- if(ok){const cJSON*v;cJSON_ArrayForEach(v,a){candidate_t c;if(parse(v,&c,now)){time_t until;c.mutual=auto_eligible(v,active_root,now,&until);next[n++]=c;}}
+ if(ok){const cJSON*v;cJSON_ArrayForEach(v,a){candidate_t c;if(parse(v,&c,now)){time_t until;c.mutual=auto_eligible(v,active_root,now,&until);
+ const cJSON*key;uint8_t decoded[32];cJSON_ArrayForEach(key,cJSON_GetObjectItemCaseSensitive(v,"acceptedClientRoots")){
+  if(c.accepted_count<10&&cJSON_IsString(key)&&wire_unb64(key->valuestring,decoded,32)&&auto_eligible(v,key->valuestring,now,&until)){snprintf(c.accepted[c.accepted_count++],44,"%s",key->valuestring);c.accepted_until=until;}
+ }next[n++]=c;}}
  for(int i=1;i<n;i++)if(next[i].mutual){candidate_t c=next[i];int k=i;while(k>0&&!next[k-1].mutual){next[k]=next[k-1];k--;}next[k]=c;}
  xSemaphoreTake(mutex,portMAX_DELAY);for(int i=0;i<n;i++)for(int k=0;k<count;k++)if(same(&next[i].relay,&rows[k].relay)){next[i].verified=rows[k].verified;next[i].attempted=rows[k].attempted;break;}
  memcpy(rows,next,n*sizeof(*next));count=n;updated=t->valuedouble;revision++;snprintf(message,sizeof(message),"可信目录节点 %d，接入后确认权限",n);xSemaphoreGive(mutex);}
@@ -121,8 +125,8 @@ void discovery_identity_changed(void){
 }
 int discovery_list(relay_t out[DISCOVERY_MAX],uint32_t*rev){if(!mutex)return 0;xSemaphoreTake(mutex,portMAX_DELAY);int n=0;if(atomic_load(&owner_valid))for(int i=0;i<count;i++)if(fresh(&rows[i],time(NULL)))out[n++]=rows[i].relay;if(rev)*rev=revision;xSemaphoreGive(mutex);return n;}
 const char*discovery_select(int i,uint32_t rev){relay_t list[DISCOVERY_MAX];uint32_t current;int n=discovery_list(list,&current);if(voice_busy())return "通联中不能切换";char actual[65];if(!current_owner(actual))return "设备身份或网络尚未就绪";xSemaphoreTake(mutex,portMAX_DELAY);bool match=!strcmp(actual,owner);xSemaphoreGive(mutex);if(!match)return "身份已变化，请刷新列表";if(rev!=current||i<0||i>=n)return "列表已更新，请重新选择";
- for(int k=0;k<relays_count();k++){relay_t r;if(!relays_get(k,&r))continue;if(same(&r,&list[i]))return relays_select(k)?NULL:"保存失败";}
- cJSON*j=cJSON_CreateObject();cJSON_AddStringToObject(j,"name",list[i].name);cJSON_AddStringToObject(j,"callsign",list[i].call);cJSON_AddStringToObject(j,"host",list[i].host);cJSON_AddStringToObject(j,"fingerprint",list[i].fingerprint);cJSON_AddNumberToObject(j,"uid",list[i].uid);cJSON_AddNumberToObject(j,"port",list[i].port);const char*error=relays_add(j);cJSON_Delete(j);if(error)return error;for(int k=0;k<relays_count();k++){relay_t r;if(!relays_get(k,&r))continue;if(same(&r,&list[i]))return relays_select(k)?NULL:"保存失败";}return "保存失败";}
+ for(int k=0;k<relays_count();k++){relay_t r;if(!relays_get(k,&r))continue;if(same(&r,&list[i]))return device_select_relay(k)?NULL:"保存失败";}
+ cJSON*j=cJSON_CreateObject();cJSON_AddStringToObject(j,"name",list[i].name);cJSON_AddStringToObject(j,"callsign",list[i].call);cJSON_AddStringToObject(j,"host",list[i].host);cJSON_AddStringToObject(j,"fingerprint",list[i].fingerprint);cJSON_AddNumberToObject(j,"uid",list[i].uid);cJSON_AddNumberToObject(j,"port",list[i].port);const char*error=relays_add(j);cJSON_Delete(j);if(error)return error;for(int k=0;k<relays_count();k++){relay_t r;if(!relays_get(k,&r))continue;if(same(&r,&list[i]))return device_select_relay(k)?NULL:"保存失败";}return "保存失败";}
 // Save a fresh, signed candidate without switching or asserting login success.
 const char*discovery_add(int i,uint32_t rev){
  if(voice_busy())return "通联中不能添加，请稍后重试";
@@ -155,4 +159,12 @@ cJSON*discovery_json(void){
   cJSON*v=node_json(&rows[i].relay);cJSON_AddBoolToObject(v,"priorityConfirmed",rows[i].mutual);cJSON_AddStringToObject(v,"state",state);cJSON_AddNumberToObject(v,"selectIndex",indexes[i]);cJSON_AddNumberToObject(v,"addIndex",strcmp(state,"stale")?i:-1);cJSON_AddItemToArray(all,v);
  }
  xSemaphoreGive(mutex);return j;
+}
+
+// Only metadata carried by the verified signed catalog is exposed here.
+int discovery_accepted_roots(const relay_t*target,char out[10][44]){
+ if(!mutex)return 0;
+ int n=0;time_t now=time(NULL);xSemaphoreTake(mutex,portMAX_DELAY);
+ for(int i=0;i<count;i++)if(same(target,&rows[i].relay)&&fresh(&rows[i],now)&&rows[i].accepted_until>now){n=rows[i].accepted_count;memcpy(out,rows[i].accepted,n*44);break;}
+ xSemaphoreGive(mutex);return n;
 }

@@ -16,3 +16,5 @@ void discovery_tick(void);
 void discovery_status(char *out,size_t size);
 
 const char *discovery_add(int index,uint32_t revision);
+
+int discovery_accepted_roots(const relay_t*target,char out[10][44]);

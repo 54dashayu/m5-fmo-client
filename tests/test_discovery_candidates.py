@@ -2,7 +2,7 @@ from pathlib import Path
 import tempfile,subprocess,os
 root=Path(__file__).resolve().parents[1];s=(root/'ui-preview-firmware/main/discovery.c').read_text()
 usable=s[s.index('static bool fresh('):s.index('static bool parse(')]
-funcs=s[s.index('static const char*candidate_status('):]
+funcs=s[s.index('static const char*candidate_status('):s.index('// Only metadata carried')]
 pre='''#include <stdbool.h>
 #include <stdint.h>
 #include <string.h>

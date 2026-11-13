@@ -47,6 +47,11 @@ class Link:
     self.serial=None
     raise
 
+def render_management_page(template, s3=False):
+ values={'FMO_WEB_TITLE':'ESP32/小智设备管理' if s3 else '机婶婶 · M5 设备管理','FMO_WEB_DEVICE':'小智' if s3 else 'M5','FMO_WEB_MODEL':'ESP32-S3 · 小智' if s3 else 'M5 FIRE','FMO_WEB_PREFIX':'E.' if s3 else 'M.'}
+ for key,value in values.items():template=template.replace('@'+key+'@',value)
+ return template.encode()
+
 def main():
  parser=argparse.ArgumentParser();parser.add_argument('--serial');parser.add_argument('--port',type=int,default=8772);args=parser.parse_args()
  if not args.serial:
@@ -54,7 +59,8 @@ def main():
   if len(ports)!=1:parser.error('请使用 --serial 指定 M5 串口；当前 CP2104 数量：'+str(len(ports)))
   args.serial=ports[0]
  link=Link(args.serial);token=secrets.token_urlsafe(32);authority=f'127.0.0.1:{args.port}';origin='http://'+authority
- page=(Path(__file__).resolve().parents[1]/'ui-preview-firmware/main/web.html').read_bytes()
+ device=next((p for p in list_ports.comports() if p.device==args.serial),None)
+ page=render_management_page((Path(__file__).resolve().parents[1]/'ui-preview-firmware/main/web.html').read_text(),bool(device and device.vid==0x303a and device.pid==0x1001))
  class Handler(BaseHTTPRequestHandler):
   def log_message(self,*args):pass
   def send(self,status,value,html=False):

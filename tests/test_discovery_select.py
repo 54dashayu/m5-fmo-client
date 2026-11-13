@@ -23,7 +23,7 @@ static bool current_owner(char*out){strcpy(out,"owner");return owner_valid;}
 static bool same(const relay_t*a,const relay_t*b){return a->uid==b->uid&&!strcmp(a->fingerprint,b->fingerprint);}
 static int relays_count(void){return saved;}
 static bool relays_get(int i,relay_t*out){if(i>=saved)return false;*out=stored;return true;}
-static bool relays_select(int i){selected=i;return true;}
+static bool device_select_relay(int i){selected=i;return true;}
 static const char*relays_add(cJSON*j){stored=rows[0].relay;saved=1;assert(cJSON_GetObjectItem(j,"uid")->valueint==1845);return NULL;}
 '''
 tail='''int main(void){rows[0].relay=(relay_t){.uid=1845,.name="Test",.call="BI4TES",.host="example.net",.port=1883};rows[0].seen=time(NULL);assert(rows[0].verified==0);assert(!discovery_select(0,7));assert(saved==1&&selected==0&&rows[0].verified==0);selected=-1;assert(discovery_select(0,6));assert(selected==-1);busy=true;assert(discovery_select(0,7));busy=false;rows[0].seen-=1200;assert(discovery_select(0,7));rows[0].seen=time(NULL);owner_valid=false;assert(discovery_select(0,7));assert(selected==-1);}

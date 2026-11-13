@@ -23,6 +23,7 @@ static void root_profile_row(cJSON*rows,int id,const char*name,const char*key,co
 static esp_err_t roots_page(request_t*r){
  if(!auth(r)){return ESP_OK;}if(voice_busy())return fail(r,"通联中暂停证书列表操作，请空闲后重试");
  cJSON*q=body(r);const char*action=js(q,"action");
+ if(action&&!strcmp(action,"auto")){esp_err_t e=auto_profiles_save(r,q);cJSON_Delete(q);return e;}
  if(action&&!strcmp(action,"import")){
   cJSON*root=cJSON_GetObjectItemCaseSensitive(q,"root");const char*error=!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(q,"trustRoot"))?"请确认信任此根 CA":wire_validate_root(root,time(NULL));
   int id=error?0:root_slot(root,true,&error);cJSON_Delete(q);return id?success(r,"根 CA 已保存；可选择体系后申请设备证书"):fail(r,error?error:"保存失败");
@@ -30,7 +31,7 @@ static esp_err_t roots_page(request_t*r){
  cJSON_Delete(q);cJSON*active=bundle?cJSON_Parse(bundle):NULL;const char*active_key=root_key(cJSON_GetObjectItemCaseSensitive(active,"rootCert"));device_view_t v;device_web_view(&v);
  cJSON*out=cJSON_CreateObject(),*rows=cJSON_AddArrayToObject(out,"profiles");root_profile_row(rows,1,"BH1JSS M5 Root CA",root_keys[0],active_key,v.mqtt_online);root_profile_row(rows,2,"FMO Passport Root CA · BI4TES",root_keys[1],active_key,v.mqtt_online);
  for(int i=0;i<CUSTOM_ROOT_SLOTS;i++){char key[16];snprintf(key,sizeof(key),"root_%d",i);cJSON*root=stored_json(key,2049);if(root)root_profile_row(rows,i+3,js(cJSON_GetObjectItemCaseSensitive(root,"subject"),"name"),root_key(root),active_key,v.mqtt_online);cJSON_Delete(root);}
- cJSON_Delete(active);return response(r,out);
+ cJSON_Delete(active);auto_profiles_describe(out);return response(r,out);
 }
 
 #include "preset_qfm_root.inc"

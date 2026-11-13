@@ -186,7 +186,7 @@ static void refresh_home(const device_view_t*v,const voice_view_t*a,const relay_
  lv_label_set_text(last_call,a->last_caller[0]?a->last_caller:"--");
  lv_label_set_text(previous_call,a->previous_caller[0]?a->previous_caller:"--");
  char name[65];name_for_display(name,sizeof(name),r->name[0]?r->name:r->call,relay_glyph);lv_label_set_text(relay_name,name);lv_label_set_text_fmt(relay_id,"%lu",(unsigned long)r->uid);
- if(a->muted)lv_label_set_text_fmt(home_notice,"%s · 静音",a->notice[0]?a->notice:"守听中");else lv_label_set_text_fmt(home_notice,"%s · 音量 %d%%",a->notice[0]?a->notice:"守听中",a->volume);for(unsigned i=0;i<3;i++)if(key_layout_letter(ui_key_layout,1)=='A'+i)lv_obj_set_style_text_color(key_hints[i],lv_color_hex(accent),0);
+ if(v->profile_message[0])lv_label_set_text(home_notice,v->profile_message);else if(a->muted)lv_label_set_text_fmt(home_notice,"%s · 静音",a->notice[0]?a->notice:"守听中");else lv_label_set_text_fmt(home_notice,"%s · 音量 %d%%",a->notice[0]?a->notice:"守听中",a->volume);for(unsigned i=0;i<3;i++)if(key_layout_letter(ui_key_layout,1)=='A'+i)lv_obj_set_style_text_color(key_hints[i],lv_color_hex(accent),0);
  int peak=a->tx?a->mic_peak:a->rx?a->speaker_peak:0;int level=peak/1800;if(level>9)level=9;
  for(int i=0;i<9;i++){int h=i<level?5+(i%3)*4:3;lv_obj_set_pos(bars[i],(FMO_WIDTH==240?180:247)+i*5,(FMO_WIDTH==240?113:119)-h);lv_obj_set_height(bars[i],h);lv_obj_set_style_bg_color(bars[i],lv_color_hex(i<level?accent:0x35505f),0);}
 }
