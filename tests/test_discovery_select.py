@@ -15,7 +15,7 @@ pre='''#include <stdbool.h>
 #define xSemaphoreGive(a) ((void)0)
 #define atomic_load(p) (*(p))
 typedef struct{char name[65],call[8],host[64],fingerprint[44];uint32_t uid;int port;}relay_t;
-typedef struct{relay_t relay;time_t verified,attempted,seen;}candidate_t;
+typedef struct{relay_t relay;time_t verified,attempted,seen;bool mutual;}candidate_t;
 static candidate_t rows[8];static int count=1,mutex=1;static uint32_t revision=7;static bool owner_valid=true,busy;static char owner[65]="owner";static int saved,selected=-1;static relay_t stored;
 static bool fresh(candidate_t*c,time_t now){return now>=c->seen&&now-c->seen<1200;}
 static bool voice_busy(void){return busy;}

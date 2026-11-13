@@ -20,7 +20,7 @@
 #include <time.h>
 #include <math.h>
 
-typedef struct {relay_t relay;time_t verified,attempted,seen;} candidate_t;
+typedef struct {relay_t relay;time_t verified,attempted,seen;bool mutual;} candidate_t;
 static candidate_t rows[DISCOVERY_MAX];
 static uint32_t checking_uid;
 static int count;static uint32_t revision=1;static time_t updated;
@@ -31,17 +31,24 @@ static char owner[65],message[96]="等待联网后自动发现";
 static const char *str(const cJSON*j,const char*k){const cJSON*v=cJSON_GetObjectItemCaseSensitive(j,k);return cJSON_IsString(v)?v->valuestring:NULL;}
 static bool same(const relay_t*a,const relay_t*b){return a->uid==b->uid&&a->port==b->port&&!strcmp(a->host,b->host)&&!strcmp(a->fingerprint,b->fingerprint)&&!strcmp(a->call,b->call);}
 static void status(const char*s){xSemaphoreTake(mutex,portMAX_DELAY);snprintf(message,sizeof(message),"%s",s);xSemaphoreGive(mutex);}
-static bool current_owner(char out[65]){char call[8];uint32_t uid;return identity(NULL,NULL,call,&uid,out);}
+static bool current_owner(char out[65]){char call[8];uint32_t uid;return identity(NULL,NULL,call,&uid,out,NULL);}
 static bool fresh(candidate_t*c,time_t now){return now>=c->seen&&now-c->seen<1200&&now>=updated&&now-updated<600;}
 static bool usable(candidate_t*c,time_t now){return c->verified>0&&now>=c->verified&&now-c->verified<3600&&fresh(c,now);}
 static bool parse(const cJSON*j,candidate_t*c,time_t now){
  const char*n=str(j,"name"),*call=str(j,"callsign"),*host=str(j,"host"),*fp=str(j,"fingerprint");
  const cJSON*u=cJSON_GetObjectItemCaseSensitive(j,"uid"),*p=cJSON_GetObjectItemCaseSensitive(j,"port"),*seen=cJSON_GetObjectItemCaseSensitive(j,"lastSeen");uint8_t key[32];
- bool confirmed=cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(j,"adminConfirmed"))&&cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(j,"mutualTrustConfirmed"));
+ bool confirmed=cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(j,"adminConfirmed"))&&(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(j,"mutualTrustConfirmed"))||cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(j,"profileAccessConfirmed")));
  if((!confirmed&&(!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(j,"rootTrusted"))||!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(j,"sourceVerified"))))||!n||!*n||strlen(n)>64||!name_utf8_valid(n)||!wire_callsign(call)||!host||!*host||strlen(host)>63||!wire_unb64(fp,key,32)||!cJSON_IsNumber(u)||u->valuedouble<1||u->valuedouble>4294967295.0||floor(u->valuedouble)!=u->valuedouble||!cJSON_IsNumber(p)||p->valuedouble<1||p->valuedouble>65535||floor(p->valuedouble)!=p->valuedouble||!cJSON_IsNumber(seen)||seen->valuedouble>now||now-seen->valuedouble>=1200)return false;
  for(const char*s=host;*s;s++)if(!((*s>='a'&&*s<='z')||(*s>='A'&&*s<='Z')||(*s>='0'&&*s<='9')||*s=='.'||*s=='-'))return false;
  for(const char*s=n;*s;s++)if((unsigned char)*s<32)return false;
  memset(c,0,sizeof(*c));snprintf(c->relay.name,65,"%s",n);snprintf(c->relay.call,8,"%s",call);snprintf(c->relay.host,64,"%s",host);snprintf(c->relay.fingerprint,44,"%s",fp);c->relay.uid=u->valuedouble;c->relay.port=p->valueint;c->seen=seen->valuedouble;return true;
+}
+static bool auto_eligible(const cJSON*j,const char*root,time_t now,time_t*until){
+ if(!root||!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(j,"adminConfirmed"))||(!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(j,"mutualTrustConfirmed"))&&!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(j,"profileAccessConfirmed"))))return false;
+ const cJSON*exp=cJSON_GetObjectItemCaseSensitive(j,"confirmedUntil"),*a=cJSON_GetObjectItemCaseSensitive(j,"acceptedClientRoots"),*v;
+ if(!cJSON_IsNumber(exp)||exp->valuedouble<=now||exp->valuedouble>now+366*86400.0||!cJSON_IsArray(a))return false;
+ cJSON_ArrayForEach(v,a)if(cJSON_IsString(v)&&!strcmp(v->valuestring,root)){*until=(time_t)exp->valuedouble;return true;}
+ return false;
 }
 static bool fetch_catalog(void){
  // Signed public catalog: no TLS allocation on the audio-constrained ESP32.
@@ -55,11 +62,14 @@ static bool fetch_catalog(void){
  cJSON*j=ok?cJSON_Parse(payload):NULL;cJSON_Delete(envelope);if(!j)return false;
  const cJSON*a=cJSON_GetObjectItemCaseSensitive(j,"servers"),*t=cJSON_GetObjectItemCaseSensitive(j,"updatedAt");const char*f=str(j,"format");time_t now=time(NULL);
  ok=f&&!strcmp(f,"m5-trusted-discovery-v1")&&cJSON_IsArray(a)&&cJSON_GetArraySize(a)<=DISCOVERY_MAX&&cJSON_IsNumber(t)&&t->valuedouble<=now&&now-t->valuedouble<600&&cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(j,"sourceConnected"));
+ char active_root[44]={0},owner_now[65],call_now[8];uint32_t uid_now;
+ if(ok)ok=identity(NULL,NULL,call_now,&uid_now,owner_now,active_root);
  candidate_t*next=calloc(DISCOVERY_MAX,sizeof(candidate_t));if(!next)ok=false;int n=0;
- if(ok){const cJSON*v;cJSON_ArrayForEach(v,a){candidate_t c;if(parse(v,&c,now))next[n++]=c;}
+ if(ok){const cJSON*v;cJSON_ArrayForEach(v,a){candidate_t c;if(parse(v,&c,now)){time_t until;c.mutual=auto_eligible(v,active_root,now,&until);next[n++]=c;}}
+ for(int i=1;i<n;i++)if(next[i].mutual){candidate_t c=next[i];int k=i;while(k>0&&!next[k-1].mutual){next[k]=next[k-1];k--;}next[k]=c;}
  xSemaphoreTake(mutex,portMAX_DELAY);for(int i=0;i<n;i++)for(int k=0;k<count;k++)if(same(&next[i].relay,&rows[k].relay)){next[i].verified=rows[k].verified;next[i].attempted=rows[k].attempted;break;}
  memcpy(rows,next,n*sizeof(*next));count=n;updated=t->valuedouble;revision++;snprintf(message,sizeof(message),"可信目录节点 %d，接入后确认权限",n);xSemaphoreGive(mutex);}
- if(ok){const cJSON*v;cJSON_ArrayForEach(v,a){candidate_t c;if(parse(v,&c,now))relays_update_name(v);}}
+ if(ok){relays_auto_clear();const cJSON*v;cJSON_ArrayForEach(v,a){candidate_t c;if(parse(v,&c,now)){time_t until;if(auto_eligible(v,active_root,now,&until)&&!voice_busy())relays_auto_add(v,until);relays_update_name(v);}}}
  free(next);cJSON_Delete(j);return ok;
 }
 static bool same_broker(const relay_t*a,const relay_t*b){
@@ -76,7 +86,7 @@ static bool write_all(int fd,const uint8_t*p,size_t n,int64_t deadline){while(n)
 static size_t mqtt_string(uint8_t*p,const char*s){size_t n=strlen(s);p[0]=n>>8;p[1]=n;memcpy(p+2,s,n);return n+2;}
 static bool probe(const relay_t*t,const char*expected_owner){
  if(!public_target(t->host))return false;
- char *password=NULL,call[8],actual[65];uint32_t uid=0;if(!identity(t,&password,call,&uid,actual)||strcmp(actual,expected_owner)||!password){free(password);return false;}
+ char *password=NULL,call[8],actual[65];uint32_t uid=0;if(!identity(t,&password,call,&uid,actual,NULL)||strcmp(actual,expected_owner)||!password){free(password);return false;}
  char id[64],port[8];snprintf(id,sizeof(id),"M5-check-%lu-%lu",(unsigned long)uid,(unsigned long)t->uid);snprintf(port,sizeof(port),"%d",t->port);
  size_t remaining=10+2+strlen(id)+2+strlen(call)+2+strlen(password);uint8_t*packet=remaining<=6144?malloc(remaining+5):NULL;size_t n=0;
  if(packet){packet[n++]=0x10;size_t v=remaining;do{uint8_t byte=v%128;v/=128;packet[n++]=byte|(v?128:0);}while(v);const uint8_t header[]={0,4,'M','Q','T','T',4,0xc2,0,10};memcpy(packet+n,header,10);n+=10;n+=mqtt_string(packet+n,id);n+=mqtt_string(packet+n,call);n+=mqtt_string(packet+n,password);}
@@ -142,7 +152,7 @@ cJSON*discovery_json(void){
  // Fresh signed candidates are selectable before actual relay authentication.
  for(int i=0;i<count;i++){
   const char*state=candidate_status(&rows[i],now,owned);
-  cJSON*v=node_json(&rows[i].relay);cJSON_AddStringToObject(v,"state",state);cJSON_AddNumberToObject(v,"selectIndex",indexes[i]);cJSON_AddNumberToObject(v,"addIndex",strcmp(state,"stale")?i:-1);cJSON_AddItemToArray(all,v);
+  cJSON*v=node_json(&rows[i].relay);cJSON_AddBoolToObject(v,"priorityConfirmed",rows[i].mutual);cJSON_AddStringToObject(v,"state",state);cJSON_AddNumberToObject(v,"selectIndex",indexes[i]);cJSON_AddNumberToObject(v,"addIndex",strcmp(state,"stale")?i:-1);cJSON_AddItemToArray(all,v);
  }
  xSemaphoreGive(mutex);return j;
 }

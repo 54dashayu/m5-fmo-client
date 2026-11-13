@@ -10,7 +10,7 @@ pre='''#include <stdint.h>
 #include <assert.h>
 #define ESP_OK 0
 #define NVS_READWRITE 1
-static uint8_t rotation;static bool breathing=true,ptt_latch=true,ui_nv_ready;static int ui_nv;static char settings_notice[64];
+static bool ui_flashing_enabled;static uint8_t rotation;static bool breathing=true,ptt_latch=true,ui_nv_ready;static int ui_nv;static char settings_notice[64];
 static uint32_t durable=12,pending;static bool exists,fail_write,fail_commit;
 static int nvs_open(const char*a,int b,int*c){(void)a;(void)b;*c=1;return 0;}
 static int nvs_set_u32(int a,const char*b,uint32_t c){(void)a;(void)b;pending=c;return fail_write;}

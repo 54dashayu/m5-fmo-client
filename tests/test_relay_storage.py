@@ -80,6 +80,13 @@ int main(void){
  relays_configure(1,"BH1JSS",ha);restart();int before=count;fail_at=writes+1;assert(!relays_select_default());fail_at=-1;assert(count==before);assert(relays_select_default());assert(relays_current(&r,NULL)>=0&&r.uid==1791&&!relays_verified(&r));
  relays_configure(3,"custom",ha);restart();int previous=selected;assert(relays_select_default());assert(selected==previous);
  profile_id=0;strcpy(index_key,"index");memset(identity_hash,0,32);
+ // Confirmed automatic entries never select or fabricate successful authentication.
+ j=make(9999);int auto_before=count,selection_before=selected;time_t until=time(NULL)+3600;
+ assert(!relays_auto_add(j,until));assert(count==auto_before+1&&selected==selection_before);assert(relays_get(count-1,&r)&&r.uid==9999&&!relays_verified(&r));assert(relays_order_at(0)==count-1);
+ int stable_writes=writes;assert(!relays_auto_add(j,until));assert(count==auto_before+1&&writes==stable_writes);
+ cJSON*bad=cJSON_Duplicate(j,true);cJSON_ReplaceItemInObject(bad,"fingerprint",cJSON_CreateString("BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"));assert(relays_auto_add(bad,until));cJSON_Delete(bad);assert(relays_get(count-1,&r)&&r.fingerprint[0]=='A');
+ assert(!relays_remove(count-1,&r));assert(count==auto_before);assert(relays_auto_add(j,until));assert(count==auto_before);restart();assert(relays_auto_add(j,until));assert(count==auto_before);
+ assert(!relays_add(j));assert(!relays_auto_add(j,until));assert(relays_order_at(0)==count-1);relays_auto_clear();assert(entries[count-1].mutual_until==0);assert(relays_auto_add(j,time(NULL)-1));cJSON_Delete(j);
  // Interrupted migration leaves legacy authoritative; retry succeeds.
  for(int k=0;k<256;k++){free(cells[k].data);memset(&cells[k],0,sizeof(cells[k]));}
  free(entries);entries=NULL;count=selected=0;

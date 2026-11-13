@@ -3,7 +3,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #define DISCOVERY_MAX 8
-typedef bool (*discovery_identity_fn)(const relay_t*,char**,char[8],uint32_t*,char[65]);
+typedef bool (*discovery_identity_fn)(const relay_t*,char**,char[8],uint32_t*,char[65],char[44]);
 esp_err_t discovery_start(discovery_identity_fn identity,SemaphoreHandle_t allocation_lock);
 void discovery_refresh(void);
 void discovery_identity_changed(void);

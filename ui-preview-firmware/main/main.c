@@ -1,3 +1,4 @@
+#include "call_indicator.h"
 #include "board.h"
 #include "nvs.h"
 #ifdef CONFIG_FMO_BOARD_XINGZHI
@@ -33,6 +34,7 @@ static lv_obj_t *home,*battery_label,*battery_fill,*local_call,*net,*caption,*ba
 static buttons_t keys;
 static uint8_t rotation;
 static bool breathing=true,ptt_latch=true;
+bool ui_flashing_enabled=true;unsigned ui_call_rgb=0xffd166,ui_call_opacity=255;
 static nvs_handle_t ui_nv;
 static bool ui_nv_ready;
 static int shown=-1;
@@ -43,11 +45,11 @@ static void create_ui(void);
 static bool save_settings(uint8_t rot,bool pulse,bool latch){
  uint32_t packed=rot|(pulse?4:0)|(latch?8:0);
  if(!ui_nv_ready||nvs_set_u32(ui_nv,"options",packed)!=ESP_OK||nvs_commit(ui_nv)!=ESP_OK){snprintf(settings_notice,sizeof(settings_notice),"设置保存失败，请重试");return false;}
- rotation=rot;breathing=pulse;ptt_latch=latch;settings_notice[0]=0;return true;
+ rotation=rot;breathing=pulse;ui_flashing_enabled=pulse;ptt_latch=latch;settings_notice[0]=0;return true;
 }
 static void load_settings(void){
  ui_nv_ready=nvs_open("fmo_ui",NVS_READWRITE,&ui_nv)==ESP_OK;
- uint32_t packed=12;if(ui_nv_ready&&nvs_get_u32(ui_nv,"options",&packed)==ESP_OK&&packed<=15){rotation=packed&3;breathing=packed&4;ptt_latch=packed&8;}
+ uint32_t packed=12;if(ui_nv_ready&&nvs_get_u32(ui_nv,"options",&packed)==ESP_OK&&packed<=15){rotation=packed&3;breathing=packed&4;ptt_latch=packed&8;ui_flashing_enabled=breathing;}
 }
 
 static display_idle_t display_idle;
@@ -119,8 +121,8 @@ static void build_home(void){
  build_compact_home();
 }
 static void refresh_home(const device_view_t*v,const voice_view_t*a,const relay_t*r){
- uint32_t accent=a->tx?0xffb778:a->rx?0x7ec9ff:v->mqtt_online?0x58d6b2:0xa8b5bf;
- uint32_t tint=a->tx?0x3b2a20:a->rx?0x193348:v->mqtt_online?0x12352f:0x263139;
+ uint32_t accent=a->tx?0xff3030:a->rx?0x20ff70:v->mqtt_online?0x58d6b2:0xa8b5bf;
+ uint32_t tint=a->tx?0x441818:a->rx?0x123d25:v->mqtt_online?0x12352f:0x263139;
  int percent;bool charging;battery_view(&percent,&charging);if(percent<0)lv_label_set_text(battery_label,"--");else lv_label_set_text_fmt(battery_label,"%d%%%s",percent,charging?"+":"");if(percent<=0)lv_obj_add_flag(battery_fill,LV_OBJ_FLAG_HIDDEN);else{lv_obj_clear_flag(battery_fill,LV_OBJ_FLAG_HIDDEN);lv_obj_set_width(battery_fill,(18*percent+99)/100);}lv_obj_set_style_bg_color(battery_fill,lv_color_hex(charging?0x5ceaff:percent<=25?0xff7766:0x58d6b2),0);
  lv_label_set_text_fmt(local_call,"M.%s",v->call);
  lv_label_set_text(net,v->online?"Wi-Fi":"未联网");
@@ -139,9 +141,15 @@ static void refresh_home(const device_view_t*v,const voice_view_t*a,const relay_
  lv_obj_set_style_text_font(call_label,pending_clock?&font20:idle?&ui_clock:&ui_call,0);
  lv_obj_set_y(call_label,FMO_WIDTH==240?55:64);if(FMO_WIDTH==240&&idle&&!pending_clock)lv_obj_set_style_text_font(call_label,&ui_call,0);
  lv_label_set_long_mode(call_label,LV_LABEL_LONG_SCROLL_CIRCULAR);
- lv_obj_set_style_text_color(call_label,lv_color_hex(a->tx?0xff5555:a->rx?0x58e68a:0xffd166),0);
- unsigned phase=(esp_timer_get_time()/1000)%1200;unsigned intensity=phase<600?phase:1200-phase;
- lv_obj_set_style_text_opa(call_label,breathing&&(a->tx||a->rx)?96+intensity*159/600:255,0);
+ call_indicator_t signal=call_indicator(a->tx,a->rx,breathing,esp_timer_get_time()/1000);
+ ui_call_rgb=signal.color;ui_call_opacity=signal.opacity;
+ lv_obj_set_style_text_color(call_label,lv_color_hex(signal.color),0);
+ lv_obj_set_style_text_opa(call_label,signal.opacity,0);
+ // Header callsign also signals TX; the central remote callsign signals RX.
+ lv_obj_set_style_text_color(local_call,lv_color_hex(a->tx?signal.color:0x7ec9ff),0);
+ lv_obj_set_style_text_opa(local_call,a->tx?signal.opacity:255,0);
+ lv_obj_set_style_text_opa(badge,(a->tx||a->rx)?signal.opacity:255,0);
+
  if(a->tx)lv_label_set_text(hint,ptt_latch?"再次短按 B 停止":"松开 B 停止");else lv_label_set_text(hint,idle?"":a->rx?"接收中":v->mqtt_online?"守听中":"中继断开");
  lv_label_set_text(last_call,a->last_caller[0]?a->last_caller:"--");
  lv_label_set_text(previous_call,a->previous_caller[0]?a->previous_caller:"--");

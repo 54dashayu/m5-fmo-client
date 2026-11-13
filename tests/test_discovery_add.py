@@ -12,7 +12,7 @@ pre=r'''
 #define xSemaphoreTake(a,b) ((void)0)
 #define xSemaphoreGive(a) ((void)0)
 typedef struct {char name[65],call[8],host[64],fingerprint[44];uint32_t uid;int port;}relay_t;
-typedef struct {relay_t relay;time_t verified,attempted,seen;}candidate_t;
+typedef struct {relay_t relay;time_t verified,attempted,seen;bool mutual;}candidate_t;
 static candidate_t rows[8];static int count=1,adds=0;static uint32_t revision=9;static time_t updated;static bool busy;static const char*save_error;
 static bool voice_busy(void){return busy;}
 static const char*relays_add(cJSON*j){adds++;assert(cJSON_GetObjectItemCaseSensitive(j,"uid")->valueint==1845);assert(!strcmp(cJSON_GetObjectItemCaseSensitive(j,"host")->valuestring,"example.net"));assert(!cJSON_GetObjectItemCaseSensitive(j,"accessVerified"));return save_error;}

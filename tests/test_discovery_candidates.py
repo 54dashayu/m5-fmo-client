@@ -15,7 +15,7 @@ pre='''#include <stdbool.h>
 #define xSemaphoreGive(a) ((void)0)
 #define atomic_load(p) (*(p))
 typedef struct {char name[65],call[8];uint32_t uid;}relay_t;
-typedef struct {relay_t relay;time_t verified,attempted,seen;}candidate_t;
+typedef struct {relay_t relay;time_t verified,attempted,seen;bool mutual;}candidate_t;
 static candidate_t rows[8];static int count;static uint32_t revision=7,checking_uid;
 static time_t updated;static bool owner_valid=true;static char message[96]="test";
 '''

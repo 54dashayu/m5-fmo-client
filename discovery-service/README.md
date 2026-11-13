@@ -25,3 +25,7 @@ M5 校验目录签名与时间戳，空闲 10 秒后读取目录，最多每分�
 `/var/lib/fmo-discovery/trust-policy.json` 包含 `preferredRootPublicKeys` 和 `confirmedServers`。每条确认记录必须提供 enabled=true、mutualTrustConfirmed=true、confirmedAt、expiresAt、evidence 以及完整 name/callsign/uid/host/port/fingerprint。管理员明确确认的固定端点优先且不依赖广播；仅在有效期内使用，不能仅凭导入根 CA、名称相似或加入收藏创建确认记录。签名目录保护此管理员声明；声明不伪装为根 CA 验签，也不替代本机 MQTT 准入。端点或指纹改变不会继承旧确认。
 
 其次优先已通过完整证书链验证且属于 preferredRootPublicKeys 的广播，再列出其他已通过根验证的广播。网页全量目录还保留普通广播供搜索。设备和网页都保持信任优先次序；本机实际认证结果独立显示。
+
+## 0.7.32 适用体系与自动添加
+
+确认记录必须包含 `acceptedClientRoots`（适用客户端根公钥）；签名目录发布 `confirmedUntil`。`mutualTrustConfirmed` 表示管理员确认互信；`profileAccessConfirmed` 表示仅本体系接入确认（例如 TES #1845），两者不能混称。固件只对当前根匹配且未过期的确认项自动加入，保留当前选中中继。当前身份重启后由新目录恢复优先级；手动删除按体系和 UID 记住，不自动加回。端点或指纹冲突不会自动覆盖。
