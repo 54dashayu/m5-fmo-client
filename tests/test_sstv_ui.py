@@ -25,8 +25,9 @@ static bool voice_sstv_start(uint32_t id){tx_starts++;tx_last_id=id;return id&&!
 static void voice_sstv_stop(void){}
 static bool save_ok=true;static sstv_status_t sstv_status;static char image_notice[112];
 static void go(int n){page=n;selection=0;if(n==SSTV){sstv_saved=0;sstv_status=SSTV_WAITING;image_notice[0]=0;}}
+static bool gallery_preview_ready=true;
 #ifdef FMO_SSTV_STREAMING
-static bool gallery_preview_ready=true;static void gallery_request(int direction){(void)direction;loads++;}
+static void gallery_request(int direction){(void)direction;loads++;}
 #else
 static void gallery_load(void){loads++;}
 #endif

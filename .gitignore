@@ -34,3 +34,6 @@ web-flasher/public/firmware/
 
 # Local device-debug notes are not release documentation.
 /docs/LOCAL_*.md
+
+web-flasher/public/sstv-preview/firmware/
+web-flasher/public/sstv-preview/app.js

@@ -92,6 +92,7 @@ static bool sstv_start_failed;
 static sstv_entry_t gallery_entries[SSTV_GALLERY_MAX];
 static int gallery_count;
 static unsigned gallery_revision;
+static bool gallery_preview_ready;
 static uint32_t tx_image_id;static bool tx_launch_failed;
 #ifdef FMO_FULL_SSTV
 static sstv_storage_t gallery_space;static bool gallery_space_valid;
@@ -106,7 +107,6 @@ static uint32_t gallery_center_id,gallery_side_id[2];
 static bool gallery_side_ready[2];
 static atomic_int gallery_work;
 static int gallery_direction;
-static bool gallery_preview_ready;
 static void gallery_request(int direction){if(atomic_load(&gallery_work))return;gallery_direction=direction;gallery_preview_ready=false;atomic_store(&gallery_work,1);}
 /* Runs on the existing management worker, never touches LVGL or button state. */
 void ui_gallery_worker_tick(void){
@@ -170,7 +170,7 @@ static lv_color_t *image_display;
 #endif
 static void image_changed(void){
 #ifdef FMO_FULL_SSTV
- const uint8_t*p=sstv_rx_pixels();if(p&&image_display){for(int y=0;y<180;y++)for(int x=0;x<240;x++){
+ const uint8_t*p=sstv_rx_pixels();if(page!=GALLERY&&p&&image_display){for(int y=0;y<180;y++)for(int x=0;x<240;x++){
  unsigned at=((y*SSTV_HEIGHT/180)*SSTV_WIDTH+x*SSTV_WIDTH/240)*2;unsigned v=p[at]|((unsigned)p[at+1]<<8);
  image_display[y*240+x]=lv_color_make(((v>>11)&31)*255/31,((v>>5)&63)*255/63,(v&31)*255/31);
  }}
@@ -214,21 +214,38 @@ sstv_image_desc.data=sstv_rx_pixels();
 }
 #endif
 #ifndef FMO_SSTV_STREAMING
+#ifdef FMO_FULL_SSTV
+/* Reuse the existing PSRAM display and decoder buffers; no extra full-size frames. */
+static void gallery_tile(const uint8_t *pixels,int left,int top,unsigned width,unsigned height){
+ for(unsigned y=0;y<height;y++)for(unsigned x=0;x<width;x++){
+  int dx=left+(int)x,dy=top+(int)y;if(dx<0||dx>=240||dy<0||dy>=180)continue;
+  unsigned at=((y*240/height)*320+x*320/width)*2,v=pixels[at]|pixels[at+1]<<8;
+  image_display[dy*240+dx]=lv_color_make(((v>>11)&31)*255/31,((v>>5)&63)*255/63,(v&31)*255/31);
+ }
+}
+#endif
 static void gallery_load(void){
 #ifdef FMO_FULL_SSTV
  gallery_space_valid=sstv_store_stats(&gallery_space);
 #endif
- image_notice[0]=0;uint8_t*p=sstv_rx_pixels();
+ image_notice[0]=0;gallery_preview_ready=false;uint8_t*p=sstv_rx_pixels();
 #ifndef FMO_FULL_SSTV
  if(p)p+=1024;
 #endif
-#ifdef FMO_SSTV_STREAMING
- if(p)memset(p,0,SSTV_PREVIEW_BYTES);
- if(gallery_count>0&&p){if(!sstv_store_preview(gallery_entries[selection].id,p))snprintf(image_notice,sizeof(image_notice),"图片已删除、损坏或相册忙");}
+#ifdef FMO_FULL_SSTV
+ if(image_display)for(unsigned i=0;i<240*180;i++)image_display[i]=lv_color_make(13,21,29);
+ if(gallery_count>0&&p&&image_display){
+  if(gallery_count>1){int neighbors[2]={(selection+gallery_count-1)%gallery_count,(selection+1)%gallery_count};
+   for(unsigned side=0;side<2;side++)if(sstv_store_load(gallery_entries[neighbors[side]].id,p))gallery_tile(p,side?188:-28,60,80,60);
+  }
+  gallery_preview_ready=sstv_store_load(gallery_entries[selection].id,p);
+  if(gallery_preview_ready){gallery_tile(p,60,45,120,90);for(int y=43;y<137;y++)for(int x=58;x<182;x++)if(x<60||x>=180||y<45||y>=135)image_display[y*240+x]=lv_color_make(88,214,178);}
+  else snprintf(image_notice,sizeof(image_notice),"图片已删除、损坏或相册忙");
+ }
 #else
  if(p)memset(p,0,SSTV_BYTES);
- if(gallery_count>0&&p){if(!sstv_store_load(gallery_entries[selection].id,p))snprintf(image_notice,sizeof(image_notice),"图片已删除、损坏或相册忙");}
- #endif
+ if(gallery_count>0&&p){gallery_preview_ready=sstv_store_load(gallery_entries[selection].id,p);if(!gallery_preview_ready)snprintf(image_notice,sizeof(image_notice),"图片已删除、损坏或相册忙");}
+#endif
  else snprintf(image_notice,sizeof(image_notice),"%s",sstv_store_error()?sstv_store_error():!p?"内存不足，无法显示图片":gallery_count<0?"相册读取失败，请重新进入":"相册为空");
  image_changed();
 }
@@ -476,7 +493,7 @@ static void key(int k,key_action_t action,void*ctx){(void)ctx;ui_key_events++;ui
 #ifdef FMO_SSTV_STREAMING
  if(page==GALLERY){if(gallery_revision!=sstv_store_revision()){go(GALLERY);return;}if(k==1){if(gallery_count>0&&gallery_preview_ready){tx_image_id=gallery_entries[selection].id;go(SSTV_TX_CONFIRM);}else if(gallery_count<=0)go(MEDIA);return;}gallery_request(k==0?-1:1);return;}
 #else
- if(page==GALLERY){if(gallery_revision!=sstv_store_revision()){go(GALLERY);return;}if(k==1){if(gallery_count>0){tx_image_id=gallery_entries[selection].id;go(SSTV_TX_CONFIRM);}else go(MEDIA);return;}if(gallery_count>0){if(k==0){if(selection)selection--;else{int n=sstv_store_newer(gallery_entries,gallery_entries[0].id);if(!n)n=sstv_store_newer(gallery_entries,0);gallery_count=n;selection=n>0?n-1:0;}}if(k==2){if(selection+1<gallery_count)selection++;else{int n=sstv_store_page(gallery_entries,gallery_entries[gallery_count-1].id);if(!n)n=sstv_store_list(gallery_entries);gallery_count=n;selection=0;}}gallery_load();}return;}
+ if(page==GALLERY){if(gallery_revision!=sstv_store_revision()){go(GALLERY);return;}if(k==1){if(gallery_count>0&&gallery_preview_ready){tx_image_id=gallery_entries[selection].id;go(SSTV_TX_CONFIRM);}else go(MEDIA);return;}if(gallery_count>0){if(k==0){if(selection)selection--;else{int n=sstv_store_newer(gallery_entries,gallery_entries[0].id);if(!n)n=sstv_store_newer(gallery_entries,0);gallery_count=n;selection=n>0?n-1:0;}}if(k==2){if(selection+1<gallery_count)selection++;else{int n=sstv_store_page(gallery_entries,gallery_entries[gallery_count-1].id);if(!n)n=sstv_store_list(gallery_entries);gallery_count=n;selection=0;}}gallery_load();}return;}
 #endif
  if(page==RESOURCES){if(k==1)go(MENU);else selection=1-selection;return;}
  if(page==MENU){if(k==0)selection=(selection+sizeof(items)/sizeof(items[0])-1)%(sizeof(items)/sizeof(items[0]));if(k==2)selection=(selection+1)%(sizeof(items)/sizeof(items[0]));if(k==1){int target=selection;if(target==0)go(RELAYS);else if(target==1)go(VOLUME);else if(target==2)go(IDENTITY);else if(target==3)go(WEB);else if(target==4)voice_tone();else if(target==5)go(MIC);else if(target==6)go(SETTINGS);else if(target==7)go(KEY_LAYOUT);

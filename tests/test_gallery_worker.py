@@ -10,7 +10,7 @@ pre=r'''
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
-static char image_notice[112];static bool gallery_space_valid,busy,read_ok=true;
+static char image_notice[112];static bool gallery_space_valid,gallery_preview_ready,busy,read_ok=true;
 static int gallery_count,selection,list_calls,preview_calls;
 static sstv_entry_t gallery_entries[SSTV_GALLERY_MAX];
 static bool voice_busy(void){return busy;}

@@ -7,6 +7,7 @@ pre=r'''
 #include <assert.h>
 #include <string.h>
 #include <stdio.h>
+static int page;enum{GALLERY=1};
 #define SSTV_WIDTH 320
 #define SSTV_HEIGHT 240
 #define SSTV_PIXELS 76800
