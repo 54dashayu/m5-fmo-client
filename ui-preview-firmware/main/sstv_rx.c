@@ -2,6 +2,7 @@
 #include "voice.h"
 #include "sdkconfig.h"
 #include "sstv_store.h"
+#include "sstv_m5_workspace.h"
 #include <time.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -21,6 +22,9 @@ static QueueHandle_t queue;
 static StaticQueue_t queue_control;
 static uint8_t *queue_storage;
 #ifdef FMO_SSTV_STREAMING
+sstv_m5_workspace_t sstv_m5_workspace;
+atomic_int sstv_m5_workspace_owner;
+static StaticSemaphore_t lock_control;
 static bool worker_started;
 static uint8_t static_queue[4*sizeof(chunk_t)];
 static StackType_t worker_stack[4096/sizeof(StackType_t)];
@@ -104,8 +108,9 @@ bool sstv_rx_init(void){
     if(atomic_flag_test_and_set(&initializing))return false;
     init_error=1;
 #ifdef FMO_SSTV_STREAMING
-    decoder=calloc(1,sizeof(*decoder));preview=calloc(1,SSTV_PREVIEW_BYTES);queue_storage=static_queue;
-    if(!lock)lock=xSemaphoreCreateMutex();
+    if(!sstv_workspace_claim(SSTV_WORKSPACE_RX)){init_error=4;atomic_flag_clear(&initializing);return false;}
+    decoder=&sstv_m5_workspace.rx.decoder;preview=sstv_m5_workspace.rx.preview;memset(preview,0,SSTV_PREVIEW_BYTES);queue_storage=static_queue;
+    if(!lock)lock=xSemaphoreCreateMutexStatic(&lock_control);
     if(!queue)queue=xQueueCreateStatic(4,sizeof(chunk_t),queue_storage,&queue_control);
 #elif defined(FMO_FULL_SSTV)
     decoder=heap_caps_calloc(1,sizeof(*decoder),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
@@ -144,7 +149,11 @@ failed:
     if(lock)vSemaphoreDelete(lock);
     lock=NULL;
 #endif
+#ifdef FMO_SSTV_STREAMING
+    sstv_workspace_release(SSTV_WORKSPACE_RX);
+#else
     free(decoder);free(preview);
+#endif
     decoder=NULL;preview=NULL;atomic_flag_clear(&initializing);return false;
 }
 void sstv_rx_break(void){serial++;}
@@ -187,7 +196,7 @@ bool sstv_rx_enable(bool on){
     if(on){completed_at=0;memset(&diagnostics,0,sizeof(diagnostics));atomic_store(&dropped,0);atomic_store(&max_feed_gap,0);atomic_store(&snapshot_count,0);atomic_store(&snapshot_misses,0);unsigned revision=decoder->generation+1;decoder_reset();decoder->generation=revision;}
     else {sstv_decoder_break(decoder);
 #ifdef FMO_SSTV_STREAMING
- sstv_stream_discard();atomic_store(&ready,false);free(decoder);free(preview);decoder=NULL;preview=NULL;
+ sstv_stream_discard();atomic_store(&ready,false);decoder=NULL;preview=NULL;sstv_workspace_release(SSTV_WORKSPACE_RX);
 #endif
     }
     atomic_store(&enabled,on);xSemaphoreGive(lock);return true;

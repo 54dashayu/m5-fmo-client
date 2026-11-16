@@ -2,9 +2,12 @@
 from pathlib import Path
 import subprocess,tempfile
 r=Path(__file__).resolve().parents[1];s=(r/'ui-preview-firmware/main/main.c').read_text()
-code=s[s.index('#define GALLERY_PREVIEW_WIDTH'):s.index('static void image_draw(')]
+code=s[s.index('#include "sstv_m5_workspace.h"'):s.index('static void image_draw(')]
 pre=r'''
 #include "sstv_store.h"
+#include "sstv_m5_workspace.h"
+sstv_m5_workspace_t sstv_m5_workspace;
+atomic_int sstv_m5_workspace_owner;
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -22,11 +25,13 @@ bool sstv_store_thumbnail(uint32_t id,uint8_t*p,unsigned w,unsigned h){assert(id
 '''
 code='#define calloc(...) forbidden_gallery_heap_allocation\n#define malloc(...) forbidden_gallery_heap_allocation\n'+code+'\n#undef calloc\n#undef malloc\n'
 post=r'''
-int main(void){gallery_request(0);assert(atomic_load(&gallery_work)==1&&!list_calls&&!preview_calls);gallery_request(1);assert(gallery_direction==0);ui_gallery_worker_tick();assert(atomic_load(&gallery_work)==3&&list_calls==1&&preview_calls==2&&gallery_preview_ready&&gallery_pixels[0]==42);ui_gallery_worker_tick();assert(preview_calls==2);
+int main(void){
+assert(sstv_workspace_claim(SSTV_WORKSPACE_RX));memset(&sstv_m5_workspace,0xa5,sizeof(sstv_m5_workspace));gallery_request(0);ui_gallery_worker_tick();assert(!gallery_preview_ready&&!preview_calls&&!list_calls);for(unsigned i=0;i<sizeof(sstv_m5_workspace);i++)assert(((unsigned char*)&sstv_m5_workspace)[i]==0xa5);sstv_workspace_release(SSTV_WORKSPACE_RX);atomic_store(&gallery_work,0);
+gallery_request(0);assert(atomic_load(&gallery_work)==1&&!list_calls&&!preview_calls);gallery_request(1);assert(gallery_direction==0);ui_gallery_worker_tick();assert(atomic_load(&gallery_work)==3&&list_calls==1&&preview_calls==2&&gallery_preview_ready&&gallery_pixels[0]==42);ui_gallery_worker_tick();assert(preview_calls==2);
 atomic_store(&gallery_work,0);gallery_request(1);assert(!gallery_preview_ready);ui_gallery_worker_tick();assert(selection==1&&gallery_preview_ready);
 atomic_store(&gallery_work,0);read_ok=false;gallery_request(-1);ui_gallery_worker_tick();assert(!gallery_preview_ready&&image_notice[0]);
 atomic_store(&gallery_work,0);busy=true;int old=preview_calls;gallery_request(0);ui_gallery_worker_tick();assert(preview_calls==old&&!gallery_preview_ready&&image_notice[0]);busy=false;read_ok=true;for(int i=0;i<1000;i++){atomic_store(&gallery_work,0);gallery_request(0);ui_gallery_worker_tick();assert(gallery_preview_ready&&gallery_pixels[4799]==42);}assert(sizeof(gallery_pixels)+sizeof(gallery_sides)==7200);puts("PASS asynchronous M5 gallery: no I/O on request, duplicate suppression, reserved 7200-byte three-image thumbnails with no heap allocation, repeated entry, paging and failure gating");}
 '''
 with tempfile.TemporaryDirectory() as td:
  p=Path(td)/'test.c';p.write_text(pre+code+post)
- subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-I'+str(r/'ui-preview-firmware/main'),str(p),'-o',td+'/test'],check=True);subprocess.run([td+'/test'],check=True)
+ subprocess.run(['cc','-DCONFIG_IDF_TARGET_ESP32','-std=c11','-Wall','-Wextra','-Werror','-I'+str(r/'ui-preview-firmware/main'),str(p),'-o',td+'/test'],check=True);subprocess.run([td+'/test'],check=True)

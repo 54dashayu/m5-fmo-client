@@ -19,6 +19,8 @@ static int64_t mock_now=123456;
 #define MALLOC_CAP_SPIRAM 2
 #define MALLOC_CAP_8BIT 4
 typedef struct {unsigned count,size,cap,is_static;unsigned char *data;} Q;
+typedef int StaticSemaphore_t;
+static inline void*xSemaphoreCreateMutexStatic(StaticSemaphore_t*s){return s;}
 typedef unsigned StackType_t;typedef int StaticTask_t;
 typedef Q StaticQueue_t;
 static inline void*xTaskCreateStatic(void(*fn)(void*),const char*n,unsigned size,void*p,int priority,StackType_t*stack,StaticTask_t*control){(void)fn;(void)n;(void)size;(void)p;(void)priority;(void)stack;return control;}
@@ -45,8 +47,17 @@ return 1000000;
 static inline size_t heap_caps_get_largest_free_block(int caps){(void)caps;return 12000;}
 static inline int64_t esp_timer_get_time(void){return mock_now;}
 '''
+ui=(root/'ui-preview-firmware/main/main.c').read_text()
+transition=ui[ui.index('static void go(int next)'):ui.index(' voice_ptt(false);voice_mic_test(false);page=next;')].replace('go(int next)','release_workspace_for_page(int next)')+'}\n'
 test=r'''
+#include "freertos/FreeRTOS.h"
+#ifdef CONFIG_IDF_TARGET_ESP32
+#define calloc(...) NULL
+#endif
 #include "sstv_rx.c"
+#ifdef CONFIG_IDF_TARGET_ESP32
+#undef calloc
+#endif
 bool voice_busy(void){return false;}
 #include <assert.h>
 #include <stdio.h>
@@ -61,7 +72,11 @@ bool sstv_stream_save(uint32_t*id){writes++;*id=7;return true;}
 #endif
 bool sstv_store_save_partial(const uint8_t*p,uint32_t t,uint32_t*id,const char*r,unsigned lines){(void)p;(void)t;(void)r;assert(lines==20);writes++;*id=8;return true;}
 bool sstv_store_save_relay(const uint8_t*p,uint32_t t,uint32_t*id,const char*relay){(void)relay;assert(t==1700000123);assert(p[0]==123);writes++;*id=7;return true;}
+/* WORKSPACE_TRANSITION */
 int main(void){int16_t pcm[640]={0};uint32_t id=0;
+#ifdef FMO_SSTV_STREAMING
+assert(sstv_workspace_claim(SSTV_WORKSPACE_GALLERY));assert(!sstv_rx_init()&&init_error==4);sstv_workspace_release(SSTV_WORKSPACE_GALLERY);
+#endif
 sstv_rx_feed(pcm,640,1,2,3);assert(!queue);assert(sstv_rx_init());assert(!atomic_load(&enabled));sstv_rx_feed(pcm,640,1,2,3);assert(!queue->count);assert(!sstv_rx_save(&id));
 assert(sstv_rx_enable(true));
 #ifndef FMO_SSTV_STREAMING
@@ -107,13 +122,19 @@ if(!setjmp(worker_done))worker(NULL);
 assert(diagnostics.samples==1920&&diagnostics.stream_breaks==2);
 decoder->status=SSTV_COMPLETE;completed_at=1700000123;decoder->image[0]=123;assert(sstv_rx_save(&id)&&id==7&&writes==1);assert(sstv_rx_enable(false));
 #ifdef FMO_SSTV_STREAMING
-assert(!atomic_load(&ready)&&!decoder&&!preview);assert(sstv_rx_enable(true));assert(decoder&&preview&&atomic_load(&enabled));assert(sstv_rx_enable(false));
+assert(!atomic_load(&ready)&&!decoder&&!preview);assert(sstv_workspace_claim(SSTV_WORKSPACE_GALLERY));memset(&sstv_m5_workspace,0xa5,sizeof(sstv_m5_workspace));sstv_workspace_release(SSTV_WORKSPACE_GALLERY);assert(sstv_rx_enable(true));assert(decoder&&preview&&atomic_load(&enabled));assert(sstv_rx_enable(false));
 #else
 assert(decoder->status==SSTV_COMPLETE);
 #endif
 
 assert(sstv_rx_enable(true));assert(!sstv_rx_save_partial(&id));decoder->status=SSTV_RECEIVING;decoder->lines=20;assert(!sstv_rx_save_partial(&id));decoder->status=SSTV_INTERRUPTED;assert(sstv_rx_save_partial(&id));assert(writes==2);assert(sstv_rx_enable(false));
-vQueueDelete(queue);vSemaphoreDelete(lock);
+#ifdef FMO_SSTV_STREAMING
+assert(sstv_rx_init());page=HOME;release_workspace_for_page(GALLERY);assert(!atomic_load(&ready));assert(sstv_workspace_claim(SSTV_WORKSPACE_GALLERY));page=GALLERY;release_workspace_for_page(SSTV);assert(sstv_workspace_claim(SSTV_WORKSPACE_RX));sstv_workspace_release(SSTV_WORKSPACE_RX);
+#endif
+vQueueDelete(queue);
+#ifndef FMO_SSTV_STREAMING
+vSemaphoreDelete(lock);
+#endif
 #ifndef FMO_SSTV_STREAMING
 free(preview);free(decoder);
 #endif
@@ -124,6 +145,6 @@ with tempfile.TemporaryDirectory() as td:
  d=Path(td);(d/'stubs.h').write_text(stub);(d/'freertos').mkdir()
  for name in ['freertos/FreeRTOS.h','freertos/task.h','freertos/queue.h','freertos/semphr.h','esp_heap_caps.h','esp_timer.h','sdkconfig.h']:(d/name).write_text('#include "stubs.h"\n')
  (d/'esp_err.h').write_text('typedef int esp_err_t;\n')
- (d/'test.c').write_text(test)
+ (d/'test.c').write_text(test.replace('/* WORKSPACE_TRANSITION */','#ifdef FMO_SSTV_STREAMING\nenum{HOME,GALLERY,SSTV};static int page;\n'+transition+'#endif'))
  for flags in ([],['-DCONFIG_FMO_BOARD_XINGZHI'],['-DCONFIG_IDF_TARGET_ESP32']):
   subprocess.run(['cc',*flags,'-std=c11','-Wall','-Wextra','-Werror','-I'+td,'-I'+str(root/'ui-preview-firmware/main'),str(d/'test.c'),str(root/'ui-preview-firmware/main/sstv_decoder.c'),'-lm','-o',td+'/test'],check=True);subprocess.run([td+'/test'],check=True)

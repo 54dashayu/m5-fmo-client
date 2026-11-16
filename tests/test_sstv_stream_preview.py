@@ -4,8 +4,7 @@ root=Path(__file__).resolve().parents[1]
 s=(root/'ui-preview-firmware/main/main.c').read_text();fn=s[s.index('static void image_draw('):s.index('static void image_changed(')]
 pre=r'''
 #include <stdint.h>
-#define SSTV_PREVIEW_WIDTH 120
-#define SSTV_PREVIEW_HEIGHT 90
+#include "sstv_decoder.h"
 #define GALLERY_PREVIEW_WIDTH 80
 #define GALLERY_PREVIEW_HEIGHT 60
 static uint8_t gallery_sides[2][40*30];static int gallery_side_ready[2]={1,1};
@@ -23,7 +22,7 @@ typedef struct{int unused;}lv_obj_t;
 typedef struct{const lv_area_t *blend_area;const lv_color_t *src_buf;unsigned opa,blend_mode;}lv_draw_sw_blend_dsc_t;
 #define LV_OPA_COVER 255
 #define LV_BLEND_MODE_NORMAL 0
-static uint8_t pixels[120*90];static uint16_t rendered[320*180];static unsigned rows;
+static uint8_t pixels[SSTV_PREVIEW_BYTES];static uint16_t rendered[320*180];static unsigned rows;
 static lv_area_t clip={0,30,319,209};static lv_draw_ctx_t context={&clip};
 static lv_draw_ctx_t *lv_event_get_draw_ctx(lv_event_t*e){(void)e;return &context;}
 static lv_obj_t *lv_event_get_target(lv_event_t*e){(void)e;return NULL;}
@@ -34,7 +33,7 @@ static void lv_draw_sw_blend(lv_draw_ctx_t*c,const lv_draw_sw_blend_dsc_t*d){con
 '''
 tail=r'''
 int main(void){for(unsigned i=0;i<sizeof(pixels);i++){pixels[i]=i*37;}
-image_draw(NULL);assert(rows==180);for(unsigned y=0;y<180;y++)for(unsigned x=0;x<240;x++){uint8_t v=pixels[(y*90/180)*120+x*120/240];assert(rendered[y*320+x+40]==lv_color_make((v>>5)*255/7,((v>>2)&7)*255/7,(v&3)*255/3));}
+image_draw(NULL);assert(rows==180);for(unsigned y=0;y<180;y++)for(unsigned x=0;x<240;x++){uint8_t v=pixels[(y*SSTV_PREVIEW_HEIGHT/180)*SSTV_PREVIEW_WIDTH+x*SSTV_PREVIEW_WIDTH/240];assert(rendered[y*320+x+40]==lv_color_make((v>>5)*255/7,((v>>2)&7)*255/7,(v&3)*255/3));}
 clip.y1=69;clip.y2=76;rows=0;image_draw(NULL);assert(rows==8);
 page=GALLERY;clip.y1=30;clip.y2=209;rows=0;
 memset(gallery_buffer,224,sizeof(gallery_buffer));memset(gallery_sides[0],28,sizeof(gallery_sides[0]));memset(gallery_sides[1],3,sizeof(gallery_sides[1]));image_draw(NULL);assert(rows==180);
@@ -51,4 +50,4 @@ gallery_side_ready[0]=gallery_side_ready[1]=0;clip.y1=30;clip.y2=209;image_draw(
 puts("PASS M5 row rendering: RX scaling preserved; three gallery images, 120x90 centered focus/border, 80x60 sides, empty sides and clipped redraw");}
 '''
 with tempfile.TemporaryDirectory() as td:
- p=Path(td)/'test.c';p.write_text(pre+fn+tail);subprocess.run(['cc','-Wall','-Wextra','-Werror',str(p),'-o',td+'/test'],check=True);subprocess.run([td+'/test'],check=True)
+ p=Path(td)/'test.c';p.write_text(pre+fn+tail);subprocess.run(['cc','-DCONFIG_IDF_TARGET_ESP32','-I'+str(root/'ui-preview-firmware/main'),'-Wall','-Wextra','-Werror',str(p),'-o',td+'/test'],check=True);subprocess.run([td+'/test'],check=True)

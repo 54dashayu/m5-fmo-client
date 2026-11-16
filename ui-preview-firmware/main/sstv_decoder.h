@@ -17,8 +17,8 @@
 #endif
 #if defined(CONFIG_IDF_TARGET_ESP32) && !defined(SSTV_HOST_FULL_FRAME)
 #define FMO_SSTV_STREAMING 1
-#define SSTV_PREVIEW_WIDTH 120
-#define SSTV_PREVIEW_HEIGHT 90
+#define SSTV_PREVIEW_WIDTH 64
+#define SSTV_PREVIEW_HEIGHT 48
 #define SSTV_PREVIEW_BYTES (SSTV_PREVIEW_WIDTH*SSTV_PREVIEW_HEIGHT)
 #endif
 #define SSTV_PIXELS (SSTV_WIDTH*SSTV_HEIGHT)
@@ -35,7 +35,12 @@ typedef struct {
     uint8_t image[SSTV_BYTES];
 #endif
     uint8_t even_y[SSTV_WIDTH], even_cr[SSTV_WIDTH];
-    float fir[31], taps[31], prev_i, prev_q, smooth, line[1140];
+    float fir[31], taps[31], prev_i, prev_q, smooth;
+#ifdef FMO_SSTV_STREAMING
+    int16_t line[1140]; /* Demodulated frequency is bounded to +/- 4000 Hz. */
+#else
+    float line[1140];
+#endif
     unsigned leader_max,vis_starts,leader_gap;
     unsigned pos, clock, leader, sync_run, vis_start, vis_bit, vis_code;
     unsigned line_start, lines, generation, header_deadline;

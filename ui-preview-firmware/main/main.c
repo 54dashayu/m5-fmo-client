@@ -98,11 +98,12 @@ static uint32_t tx_image_id;static bool tx_launch_failed;
 static sstv_storage_t gallery_space;static bool gallery_space_valid;
 #endif
 #ifdef FMO_SSTV_STREAMING
+#include "sstv_m5_workspace.h"
 #define GALLERY_PREVIEW_WIDTH 80
 #define GALLERY_PREVIEW_HEIGHT 60
 /* Reserve at link time: network/HTTP allocations can fragment the heap below 4800 bytes. */
-static uint8_t gallery_pixels[GALLERY_PREVIEW_WIDTH*GALLERY_PREVIEW_HEIGHT];
-static uint8_t gallery_sides[2][40*30];
+#define gallery_pixels (sstv_m5_workspace.gallery.pixels)
+#define gallery_sides (sstv_m5_workspace.gallery.sides)
 static uint32_t gallery_center_id,gallery_side_id[2];
 static bool gallery_side_ready[2];
 static atomic_int gallery_work;
@@ -112,6 +113,7 @@ static void gallery_request(int direction){if(atomic_load(&gallery_work))return;
 void ui_gallery_worker_tick(void){
  int expected=1;if(!atomic_compare_exchange_strong(&gallery_work,&expected,2))return;
  image_notice[0]=0;gallery_space_valid=false;
+ if(!sstv_workspace_claim(SSTV_WORKSPACE_GALLERY)){snprintf(image_notice,sizeof(image_notice),"通联中，请稍后打开相册");goto done;}
  if(voice_busy()){snprintf(image_notice,sizeof(image_notice),"通联中，请稍后打开相册");goto done;}
  if(gallery_direction==0){gallery_center_id=0;gallery_side_id[0]=gallery_side_id[1]=0;gallery_count=sstv_store_list(gallery_entries);selection=0;}
  else if(gallery_count>0){if(gallery_direction<0){if(selection)selection--;else{int n=sstv_store_newer(gallery_entries,gallery_entries[0].id);if(!n)n=sstv_store_newer(gallery_entries,0);gallery_count=n;selection=n>0?n-1:0;}}
@@ -291,8 +293,15 @@ static void ui_height(lv_obj_t*o,int h){lv_obj_set_height(o,ui_y(h));}
 static lv_obj_t *label(const char *text,int x,int y,const lv_font_t *font,uint32_t color){
  lv_obj_t *o=lv_label_create(lv_scr_act());lv_label_set_text(o,text);lv_obj_set_pos(o,x,y);lv_obj_set_width(o,FMO_WIDTH-24);lv_obj_set_style_text_font(o,font,0);lv_obj_set_style_text_color(o,lv_color_hex(color),0);return o;
 }
+static int ui_corner_radius(int radius){
+#ifdef CONFIG_IDF_TARGET_ESP32
+ (void)radius;return 0; /* Avoid LVGL radius-mask heap allocation on the no-PSRAM M5. */
+#else
+ return radius;
+#endif
+}
 static lv_obj_t *box(lv_obj_t*p,int x,int y,int w,int h,uint32_t bg,int radius){
- lv_obj_t*o=lv_obj_create(p);lv_obj_remove_style_all(o);lv_obj_set_pos(o,x,y);lv_obj_set_size(o,w,h);lv_obj_set_style_bg_opa(o,LV_OPA_COVER,0);lv_obj_set_style_bg_color(o,lv_color_hex(bg),0);lv_obj_set_style_radius(o,radius,0);lv_obj_clear_flag(o,LV_OBJ_FLAG_SCROLLABLE);return o;
+ lv_obj_t*o=lv_obj_create(p);lv_obj_remove_style_all(o);lv_obj_set_pos(o,x,y);lv_obj_set_size(o,w,h);lv_obj_set_style_bg_opa(o,LV_OPA_COVER,0);lv_obj_set_style_bg_color(o,lv_color_hex(bg),0);lv_obj_set_style_radius(o,ui_corner_radius(radius),0);lv_obj_clear_flag(o,LV_OBJ_FLAG_SCROLLABLE);return o;
 }
 static lv_obj_t *home_label(const char*t,int x,int y,int w,const lv_font_t*f,uint32_t c){
  lv_obj_t*o=lv_label_create(home);lv_obj_set_pos(o,x,y);lv_obj_set_width(o,w);lv_obj_set_style_text_font(o,f,0);lv_obj_set_style_text_color(o,lv_color_hex(c),0);lv_label_set_long_mode(o,LV_LABEL_LONG_DOT);lv_label_set_text(o,t);return o;
@@ -310,7 +319,7 @@ static void build_wide_home(void){
 #endif
 lv_obj_set_style_border_width(card,1,0);lv_obj_set_style_border_color(card,lv_color_hex(0x263b48),0);
  caption=home_label("我的呼号",23,43,180,&ui_small,0xb4c7d2);
- badge=home_label("未接入",240,42,58,&ui_small,0xa8b5bf);lv_obj_set_style_text_align(badge,LV_TEXT_ALIGN_CENTER,0);lv_obj_set_style_bg_opa(badge,LV_OPA_COVER,0);lv_obj_set_style_bg_color(badge,lv_color_hex(0x263139),0);lv_obj_set_style_radius(badge,9,0);lv_obj_set_style_pad_ver(badge,3,0);
+ badge=home_label("未接入",240,42,58,&ui_small,0xa8b5bf);lv_obj_set_style_text_align(badge,LV_TEXT_ALIGN_CENTER,0);lv_obj_set_style_bg_opa(badge,LV_OPA_COVER,0);lv_obj_set_style_bg_color(badge,lv_color_hex(0x263139),0);lv_obj_set_style_radius(badge,ui_corner_radius(9),0);lv_obj_set_style_pad_ver(badge,3,0);
  call_label=home_label("--",22,64,276,&ui_call,0xffd166);
  hint=home_label("等待重新接入",23,110,216,&ui_small,0xc2d3de);
  for(int i=0;i<9;i++)bars[i]=box(home,247+i*5,116,3,3,0x58d6b2,1);
@@ -439,9 +448,12 @@ static void refresh_home(const device_view_t*v,const voice_view_t*a,const relay_
 }
 static void go(int next){if(page==SSTV
 #ifdef FMO_SSTV_STREAMING
- ||page==GALLERY
+ ||page==GALLERY||next==GALLERY
 #endif
  ){sstv_rx_enable(false);}
+#ifdef FMO_SSTV_STREAMING
+ if(page==GALLERY&&next!=GALLERY)sstv_workspace_release(SSTV_WORKSPACE_GALLERY);
+#endif
  voice_ptt(false);voice_mic_test(false);page=next;
  if(next==SSTV){
 #ifdef FMO_FULL_SSTV
