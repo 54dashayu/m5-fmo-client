@@ -8,6 +8,7 @@ pre=r'''
 #include <stdint.h>
 #include <stdio.h>
 #include <assert.h>
+static bool sstv_sd_supported(void){return true;}
 #include "cJSON.h"
 typedef int esp_err_t;
 #define ESP_OK 0

@@ -10,6 +10,7 @@ static void card_job_tick(void){
  atomic_store(&card_job_active,false);
 }
 static const char *card_job_start(bool format){
+ if(!sstv_sd_supported())return "本设备不支持 TF 卡管理";
  if(!atomic_load(&card_worker_ready))return "后台尚未就绪，请稍后重试";
  if(atomic_exchange(&card_job_active,true))return "TF 卡操作正在进行，请等待完成";
  card_job_format=format;card_job_ok=false;card_job_error="";sstv_sd_manage_reset();atomic_fetch_add(&card_job_id,1);

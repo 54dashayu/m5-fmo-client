@@ -3,7 +3,7 @@ from pathlib import Path
 import subprocess,tempfile
 r=Path(__file__).resolve().parents[1]
 html=(r/'ui-preview-firmware/main/web.html').read_text()
-code=html[html.index('let storageWorking=false;'):html.index("$('gallerySwitch').onclick")]
+code=html[html.index('let storageWorking=false;'):html.index('if(tfSupported){')]
 js=r'''
 const vm=require('vm'),assert=require('assert');
 const source=SOURCE;
@@ -11,7 +11,7 @@ const source=SOURCE;
 const els={},seen=[],requests=[];const $=id=>els[id]??={disabled:false,hidden:true,textContent:'',set value(v){seen.push(v)},set max(v){}};
 let stages=[{jobId:7,active:true,completedStages:2,format:true},{jobId:mode==='reboot'?0:7,active:false,success:mode!=='failure',error:'write failed',completedStages:mode==='failure'?0:4}];
 const start={jobId:7,active:true,completedStages:0,format:true};
-const ctx={$,setTimeout:f=>{queueMicrotask(f)},galleryBefore:1,gallerySelected:new Set(),loadGallery:async()=>{},storageInfo:async()=>{},api:async(path,method)=>{requests.push([path,method]);return method==='POST'?start:stages.shift()}};
+const ctx={tfSupported:true,$,setTimeout:f=>{queueMicrotask(f)},galleryBefore:1,gallerySelected:new Set(),loadGallery:async()=>{},storageInfo:async()=>{},api:async(path,method)=>{requests.push([path,method]);return method==='POST'?start:stages.shift()}};
 vm.createContext(ctx);vm.runInContext(source,ctx);
 await ctx.storageAction(mode==='resume'?null:'/api/gallery/card/format',{},mode==='resume'?start:undefined);
 assert(seen.includes(2));assert.equal($('galleryCardFormat').disabled,false);

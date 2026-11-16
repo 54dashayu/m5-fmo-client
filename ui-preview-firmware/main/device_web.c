@@ -537,6 +537,7 @@ static esp_err_t wall_probe(request_t*r);
 #include "gallery_card_job.inc"
 static esp_err_t gallery_storage(request_t*r,const char *op){
  if(!auth(r))return ESP_OK;
+ if(!sstv_sd_supported())return fail(r,"本设备不支持 TF 卡管理");
  if(!strcmp(op,"gallery_storage")){cJSON*j=cJSON_CreateObject();cJSON_AddStringToObject(j,"selected",sstv_store_on_sd()?"sd":"flash");cJSON_AddBoolToObject(j,"sdSupported",sstv_sd_supported());cJSON_AddBoolToObject(j,"sdReady",sstv_sd_ready());cJSON_AddStringToObject(j,"sdError",sstv_sd_error());uint64_t total,used;if(sstv_sd_space(&total,&used)){cJSON_AddNumberToObject(j,"sdTotal",total);cJSON_AddNumberToObject(j,"sdUsed",used);}return response(r,j);}
  if(voice_busy()||sstv_rx_active())return fail(r,"请先结束通联并退出 SSTV 接收");
  const char *err=NULL;
@@ -726,11 +727,13 @@ static esp_err_t network_start(void){
  {.uri="/api/gallery/wall/status",.method=HTTP_GET,.handler=http_api,.user_ctx="sstv_wall_probe"},
  {.uri="/api/sstv/status",.method=HTTP_GET,.handler=http_api,.user_ctx="sstv_status"},
 #endif
+#ifdef CONFIG_IDF_TARGET_ESP32
  {.uri="/api/gallery/card/status",.method=HTTP_GET,.handler=http_api,.user_ctx="gallery_card_status"},
  {.uri="/api/gallery/storage",.method=HTTP_GET,.handler=http_api,.user_ctx="gallery_storage"},
  {.uri="/api/gallery/storage",.method=HTTP_POST,.handler=http_api,.user_ctx="gallery_storage_select"},
  {.uri="/api/gallery/card/retry",.method=HTTP_POST,.handler=http_api,.user_ctx="gallery_card_retry"},
  {.uri="/api/gallery/card/format",.method=HTTP_POST,.handler=http_api,.user_ctx="gallery_card_format"},
+#endif
  {.uri="/api/gallery/import",.method=HTTP_POST,.handler=gallery_import},
  {.uri="/api/gallery/page",.method=HTTP_POST,.handler=http_api,.user_ctx="gallery_page"},
  {.uri="/api/sstv/tx",.method=HTTP_POST,.handler=http_api,.user_ctx="sstv_tx_start"},
