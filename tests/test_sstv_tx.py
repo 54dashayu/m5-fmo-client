@@ -30,11 +30,19 @@ static bool sstv_rx_active(void){return rx_active;}
 static void sstv_rx_break(void){}
 #ifdef FMO_SSTV_STREAMING
 bool sstv_rx_enable(bool on){(void)on;return true;}
+static int decoder_storage;static void *decoder=&decoder_storage;
+static unsigned decoder_frees,decoder_restores;
+static void opus_decoder_destroy(void*p){assert(p==&decoder_storage);decoder_frees++;}
+static void *opus_decoder_create(int rate,int channels,int*error){assert(rate==8000&&channels==1);*error=0;decoder_restores++;return &decoder_storage;}
 #endif
 static void audio_stop(void){}
 static void notice(const char*s){(void)s;}
 static void reason(const char*s){snprintf(last_reason,sizeof(last_reason),"%s",s);}
-static bool publish_packet(const uint8_t*p,size_t n){(void)p;(void)n;if(blocked)return false;packets++;if(stop_after&&packets==stop_after)sstv_cancel=true;if(disconnect_after&&packets==disconnect_after){state.connected=false;connection_epoch++;}return true;}
+static bool publish_packet(const uint8_t*p,size_t n){(void)p;(void)n;if(blocked)return false;
+#ifdef FMO_SSTV_STREAMING
+assert(!decoder);
+#endif
+packets++;if(stop_after&&packets==stop_after)sstv_cancel=true;if(disconnect_after&&packets==disconnect_after){state.connected=false;connection_epoch++;}return true;}
 static void tx_status(voice_tx_t*q){state.tx_pending=q->count;}
 static void flush(voice_tx_t*q,uint8_t*f,int count,uint32_t base,uint16_t seq){(void)count;(void)base;(void)seq;voice_tx_push(q,f,328,now);voice_tx_pump(q,now,publish_packet);tx_status(q);}
 struct sstv_reader {int unused;};static struct sstv_reader reader;
@@ -54,7 +62,11 @@ int main(void){int16_t pcm[640];uint8_t frames[656];voice_tx_t q={0};
  reset();corrupt=true;assert(voice_sstv_start(1));send_sstv(1,connection_epoch,pcm,frames,&q);assert(packets>0&&packets<463&&!sstv_job&&!state.tx);
  reset();assert(voice_sstv_start(1));voice_sstv_stop();send_sstv(1,connection_epoch,pcm,frames,&q);assert(!packets&&!sstv_job);
  reset();q=(voice_tx_t){0};assert(voice_sstv_probe(1));send_sstv(1,connection_epoch,pcm,frames,&q);assert(!packets&&sstv_diag.generated==463&&sstv_diag.submitted==0&&!state.tx&&!strcmp(last_reason,"sstv_probe_complete"));
- puts("PASS actual SSTV TX: 463 timed packets, counter continuity, busy rejection, cancel, disconnect, congestion, missing/corrupt source");
+
+#ifdef FMO_SSTV_STREAMING
+assert(decoder==&decoder_storage&&decoder_frees==decoder_restores&&decoder_frees>5);
+#endif
+puts("PASS actual SSTV TX: 463 timed packets, counter continuity, busy rejection, cancel, disconnect, congestion, missing/corrupt source");
 }
 '''
 with tempfile.TemporaryDirectory() as td:

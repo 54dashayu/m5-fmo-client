@@ -2,11 +2,11 @@
 #ifdef FMO_SSTV_STREAMING
 static FILE *stream_file;
 static unsigned stream_rows_written;
-static uint32_t stream_crc,stream_id;
+static uint32_t stream_crc,stream_id,stream_saved_id;
 static bool stream_prepared,stream_complete;
 static char stream_context[128];
 static void pending_path(char p[300]){snprintf(p,300,"%s/fmo-sstv-pending.tmp",directory);}
-static void discard_locked(void){if(stream_file)fclose(stream_file);stream_file=NULL;stream_complete=false;stream_rows_written=0;char p[300];pending_path(p);unlink(p);}
+static void discard_locked(void){if(stream_file)fclose(stream_file);stream_file=NULL;stream_complete=false;stream_rows_written=0;stream_saved_id=0;char p[300];pending_path(p);unlink(p);}
 void sstv_stream_discard(void){if(error||!take())return;discard_locked();stream_prepared=false;give();}
 bool sstv_stream_prepare(void){
  if(error||!take())return false;
@@ -66,7 +66,23 @@ bool sstv_stream_save(uint32_t *id){
  if(stream_complete&&stream_id){char p[300],target[300];pending_path(p);filename(target,stream_id);FILE*f=fopen(p,"r+b");
   if(f){uint8_t v[4];put(v,stream_id);ok=fseek(f,8,SEEK_SET)==0&&fwrite(v,1,4,f)==4&&fflush(f)==0&&fsync(fileno(f))==0;if(fclose(f))ok=false;}
   if(ok)ok=rename(p,target)==0;
-  if(ok){*id=stream_id;stream_complete=false;stream_prepared=false;}
+  if(ok){*id=stream_id;stream_saved_id=stream_id;stream_complete=false;stream_prepared=false;}
+ }
+ give();return ok;
+}
+/* Post-reception repaint only. No rereads compete with the live decoder. */
+bool sstv_stream_preview_rows(unsigned first,unsigned count,uint16_t *out){
+ if(error||!out||!count||count>2||first+count>180||!take())return false;
+ bool ok=!stream_file&&(stream_complete||stream_saved_id);
+ char path[300];if(stream_saved_id)filename(path,stream_saved_id);else pending_path(path);
+ FILE*f=ok?fopen(path,"rb"):NULL;ok=ok&&f;
+ if(f){setvbuf(f,NULL,_IONBF,0);uint8_t raw[640];
+  for(unsigned i=0;ok&&i<count;i++){
+   unsigned source=(first+i)*240/180;
+   ok=fseek(f,152+source*640,SEEK_SET)==0&&fread(raw,1,sizeof(raw),f)==sizeof(raw);
+   if(ok)for(unsigned x=0;x<240;x++){unsigned at=(x*320/240)*2;out[i*240+x]=raw[at]|raw[at+1]<<8;}
+  }
+  fclose(f);
  }
  give();return ok;
 }

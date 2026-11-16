@@ -8,10 +8,12 @@ static uint8_t image[SSTV_BYTES],preview[SSTV_PREVIEW_BYTES];static size_t offse
 static bool writer(void*ctx,const uint8_t*p,size_t n){(void)ctx;assert(offset+n<=sizeof(image));assert(!memcmp(image+offset,p,n));offset+=n;return true;}
 int main(void){char path[]="/tmp/sstv-stream-XXXXXX";assert(mkdtemp(path));assert(!sstv_store_init(path));
  for(unsigned i=0;i<sizeof(image);i++){image[i]=(i*17+i/31)&255;}
- uint32_t id=0;sstv_entry_t entries[SSTV_GALLERY_MAX];assert(sstv_stream_prepare());assert(sstv_stream_begin("test / 1791"));assert(sstv_stream_rows(0,image));assert(!sstv_stream_finish(123));assert(!sstv_stream_save(&id));assert(sstv_store_list(entries)==0);sstv_stream_discard();
+ uint16_t hi[480];uint32_t id=0;sstv_entry_t entries[SSTV_GALLERY_MAX];assert(sstv_stream_prepare());assert(sstv_stream_begin("test / 1791"));assert(sstv_stream_rows(0,image));assert(!sstv_stream_finish(123));assert(!sstv_stream_save(&id));assert(sstv_store_list(entries)==0);sstv_stream_discard();
  assert(sstv_stream_prepare());assert(sstv_stream_begin("test / 1791"));
  for(unsigned row=0;row<240;row+=2){assert(sstv_stream_rows(row,image+row*640));}
- assert(sstv_stream_finish(123));assert(sstv_store_list(entries)==0);assert(sstv_stream_save(&id));assert(id==1);assert(sstv_store_list(entries)==1);assert(entries[0].width==320&&entries[0].height==240&&entries[0].saved_at==123);assert(!strcmp(entries[0].relay,"test / 1791"));
+ assert(!sstv_stream_preview_rows(0,2,hi));assert(sstv_stream_finish(123));
+ for(unsigned y=0;y<180;y+=2){assert(sstv_stream_preview_rows(y,2,hi));for(unsigned j=0;j<2;j++)for(unsigned x=0;x<240;x++){unsigned at=(((y+j)*240/180)*320+x*320/240)*2;assert(hi[j*240+x]==(image[at]|image[at+1]<<8));}}
+ assert(!sstv_stream_preview_rows(179,2,hi));assert(sstv_store_list(entries)==0);assert(sstv_stream_save(&id));assert(id==1);assert(sstv_stream_preview_rows(178,2,hi));assert(sstv_store_list(entries)==1);assert(entries[0].width==320&&entries[0].height==240&&entries[0].saved_at==123);assert(!strcmp(entries[0].relay,"test / 1791"));
  assert(sstv_store_export(id,writer,NULL));assert(offset==sizeof(image));assert(sstv_store_preview(id,preview));
  for(unsigned y=0;y<SSTV_PREVIEW_HEIGHT;y++)for(unsigned x=0;x<SSTV_PREVIEW_WIDTH;x++){unsigned at=((y*240/SSTV_PREVIEW_HEIGHT)*320+x*320/SSTV_PREVIEW_WIDTH)*2,v=image[at]|image[at+1]<<8,r=(v>>11)*255/31,g=((v>>5)&63)*255/63,b=(v&31)*255/31;assert(preview[y*SSTV_PREVIEW_WIDTH+x]==((r&224)|((g>>3)&28)|(b>>6)));}
  char file[256];snprintf(file,sizeof(file),"%s/fmo-sstv-00000001.bin",path);FILE*f=fopen(file,"r+b");assert(f);fseek(f,170,SEEK_SET);fputc(0,f);fclose(f);offset=0;assert(!sstv_store_export(id,writer,NULL)&&offset==0);assert(sstv_store_delete(id));

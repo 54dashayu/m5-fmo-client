@@ -9,8 +9,12 @@ stub=r'''
 #include <stdint.h>
 #include <setjmp.h>
 static jmp_buf worker_done;
-static int run_worker,one_timeout;
+static int run_worker,one_timeout,semaphore_depth,mock_lock_busy;
 static int64_t mock_now=123456;
+typedef int portMUX_TYPE;
+#define portMUX_INITIALIZER_UNLOCKED 0
+#define portENTER_CRITICAL(p) (++*(p))
+#define portEXIT_CRITICAL(p) (--*(p))
 #define pdTRUE 1
 #define pdPASS 1
 #define portMAX_DELAY 0xffffffffu
@@ -23,7 +27,7 @@ typedef int StaticSemaphore_t;
 static inline void*xSemaphoreCreateMutexStatic(StaticSemaphore_t*s){return s;}
 typedef unsigned StackType_t;typedef int StaticTask_t;
 typedef Q StaticQueue_t;
-static inline void*xTaskCreateStatic(void(*fn)(void*),const char*n,unsigned size,void*p,int priority,StackType_t*stack,StaticTask_t*control){(void)fn;(void)n;(void)size;(void)p;(void)priority;(void)stack;return control;}
+static inline void*xTaskCreateStaticPinnedToCore(void(*fn)(void*),const char*n,unsigned size,void*p,int priority,StackType_t*stack,StaticTask_t*control,int core){if(core!=1)abort();(void)fn;(void)n;(void)size;(void)p;(void)priority;(void)stack;return control;}
 typedef Q* QueueHandle_t;typedef void* SemaphoreHandle_t;
 static inline Q*xQueueCreate(unsigned cap,unsigned size){Q*q=calloc(1,sizeof(*q));q->cap=cap;q->size=size;q->data=calloc(cap,size);return q;}
 static inline Q*xQueueCreateStatic(unsigned cap,unsigned size,uint8_t*data,Q*q){memset(q,0,sizeof(*q));q->cap=cap;q->size=size;q->data=data;q->is_static=1;return q;}
@@ -33,8 +37,8 @@ static inline int xQueueReceive(Q*q,void*p,unsigned wait){(void)wait;if(!run_wor
 static inline void xQueueReset(Q*q){q->count=0;}
 static inline void vQueueDelete(Q*q){if(!q->is_static){free(q->data);free(q);}}
 static inline void*xSemaphoreCreateMutex(void){return malloc(1);}
-static inline int xSemaphoreTake(void*s,unsigned wait){(void)wait;return s!=NULL;}
-static inline void xSemaphoreGive(void*s){(void)s;}
+static inline int xSemaphoreTake(void*s,unsigned wait){(void)wait;if(!s||mock_lock_busy)return 0;semaphore_depth++;return 1;}
+static inline void xSemaphoreGive(void*s){(void)s;semaphore_depth--;}
 static inline void vSemaphoreDelete(void*s){free(s);}
 static inline int xTaskCreate(void(*fn)(void*),const char*n,unsigned size,void*p,int priority,void*handle){(void)fn;(void)n;(void)size;(void)p;(void)priority;(void)handle;return 1;}
 static inline size_t heap_caps_get_free_size(int cap){(void)cap;
@@ -63,6 +67,7 @@ bool voice_busy(void){return false;}
 #include <stdio.h>
 static unsigned writes;
 #ifdef FMO_SSTV_STREAMING
+bool sstv_stream_preview_rows(unsigned first,unsigned count,uint16_t*out){for(unsigned i=0;i<count*240;i++)out[i]=(first*240+i)&65535;return true;}
 bool sstv_stream_prepare(void){return true;}bool sstv_stream_begin(const char*r){(void)r;return true;}
 bool sstv_stream_rows(unsigned row,const uint8_t*p){(void)row;(void)p;return true;}
 bool sstv_stream_finish_partial(uint32_t at){(void)at;return true;}
@@ -79,6 +84,29 @@ assert(sstv_workspace_claim(SSTV_WORKSPACE_GALLERY));assert(!sstv_rx_init()&&ini
 #endif
 sstv_rx_feed(pcm,640,1,2,3);assert(!queue);assert(sstv_rx_init());assert(!atomic_load(&enabled));sstv_rx_feed(pcm,640,1,2,3);assert(!queue->count);assert(!sstv_rx_save(&id));
 assert(sstv_rx_enable(true));
+#ifdef FMO_SSTV_STREAMING
+uint8_t preview_line[SSTV_PREVIEW_WIDTH+2];memset(preview_line,0xa5,sizeof(preview_line));memset(preview+3*SSTV_PREVIEW_WIDTH,0x42,SSTV_PREVIEW_WIDTH);assert(sstv_rx_preview_row(3,preview_line+1));assert(!semaphore_depth&&preview_line[0]==0xa5&&preview_line[sizeof(preview_line)-1]==0xa5);for(unsigned i=1;i<=SSTV_PREVIEW_WIDTH;i++)assert(preview_line[i]==0x42);mock_lock_busy=1;assert(sstv_rx_preview_row(3,preview_line+1));assert(!preview_mux);mock_lock_busy=0;assert(!sstv_rx_preview_row(SSTV_PREVIEW_HEIGHT,preview_line+1));assert(!semaphore_depth);
+memset(preview,0x5a,SSTV_PREVIEW_BYTES);assert(sstv_rx_enable(true));for(unsigned i=0;i<SSTV_PREVIEW_BYTES;i++)assert(!preview[i]);
+// Ordinary broadband audio must update DSP state without painting any pixels.
+uint32_t noise=7;for(unsigned frame=0;frame<50;frame++){
+ for(unsigned i=0;i<640;i++){noise=noise*1664525u+1013904223u;pcm[i]=(int16_t)(noise>>16);}
+ sstv_rx_feed(pcm,640,1,2,3);run_worker=1;if(!setjmp(worker_done))worker(NULL);
+}
+assert(decoder->status==SSTV_WAITING&&!decoder->lines);for(unsigned i=0;i<SSTV_PREVIEW_BYTES;i++)assert(!preview[i]);
+memset(pcm,0,sizeof(pcm));assert(sstv_rx_enable(true));
+uint8_t native[1280];for(unsigned i=0;i<640;i++){native[i*2]=i;native[i*2+1]=i>>8;}
+unsigned first,count;uint16_t hi[240];preview_publish(0,native);assert(sstv_rx_preview_dirty(&first,&count)&&first==0&&count==2);
+assert(sstv_rx_preview_high_row(0,hi));for(unsigned x=0;x<240;x++)assert(hi[x]==x*320/240);
+preview_publish(2,native);assert(high_skipped==1);assert(sstv_rx_preview_high_row(1,hi));for(unsigned x=0;x<240;x++)assert(hi[x]==320+x*320/240);
+assert(!sstv_rx_preview_dirty(&first,&count)&&high_drawn==2);
+assert(!sstv_rx_preview_tick()); // Never reread storage during live reception.
+atomic_store(&enabled,false);decoder->status=SSTV_COMPLETE;replay_active=true;replay_next=0;
+for(unsigned y=0;y<180;y+=2){sstv_rx_preview_tick();assert(sstv_rx_preview_dirty(&first,&count)&&first==y&&count==2);
+ for(unsigned j=0;j<2;j++){assert(sstv_rx_preview_high_row(y+j,hi));for(unsigned x=0;x<240;x++)assert(hi[x]==((y+j)*240+x));}
+ assert(!sstv_rx_preview_dirty(&first,&count));
+}
+assert(high_replayed==180&&!high_errors&&!sstv_rx_preview_tick());assert(sstv_rx_enable(true));
+#endif
 #ifndef FMO_SSTV_STREAMING
 unsigned generation=~0u,lines=0;sstv_status_t snapshot_status;
 memset(decoder->image,0x5a,SSTV_BYTES);decoder->generation++;assert(sstv_rx_snapshot(&snapshot_status,&lines,&generation));

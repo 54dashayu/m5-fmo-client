@@ -3,7 +3,9 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import {webcrypto} from 'node:crypto';
 import {BOARDS,LAYOUTS,partitionPlan,validateManifest,validPartitions,selectedParts} from '../web-flasher/board-policy.mjs';
-const source=fs.readFileSync(new URL('../web-flasher/app.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'');
+const source=fs.readFileSync(new URL('../web-flasher/app.js',import.meta.url),'utf8')
+ .replace(/^import .*;\n/gm,'')
+ .replace(/let flashToolsPromise=null;\nconst loadFlashTools=[\s\S]*?\n\}\)\);\n/,'const loadFlashTools=async()=>({ESPLoader,Transport,md5});\n');
 function table(id,legacy=false){const rows=legacy?LAYOUTS[id].slice(0,-1):LAYOUTS[id],buf=new Uint8Array(4096).fill(255),v=new DataView(buf.buffer);rows.forEach(([type,sub,off,size],i)=>{let p=i*32;v.setUint16(p,0x50aa,true);v.setUint8(p+2,type);v.setUint8(p+3,sub);v.setUint32(p+4,off,true);v.setUint32(p+8,size,true);v.setUint32(p+28,0,true)});return buf;}
 async function scenario(id,{install=false,mismatch=false,incompatible=false,cancel=false,migrate=false,smallFlash=false}={}){
  const els={},input={value:install?'install':'upgrade'},writes=[];let signals=[],manifest,files={},selectedChip=BOARDS[id].chip;

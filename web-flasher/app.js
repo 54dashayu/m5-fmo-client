@@ -1,9 +1,16 @@
-import {ESPLoader, Transport} from 'esptool-js';
-import {md5} from 'js-md5';
 import {BOARDS,validateManifest,validPartitions,selectedParts,partitionPlan} from './board-policy.mjs';
 const $=id=>document.getElementById(id);
 let boardId='m5-fire';
 let busy=false, session=null, currentManifest=null, refreshing=false;
+let flashToolsPromise=null;
+const loadFlashTools=()=>flashToolsPromise??=Promise.all([
+ import('esptool-js'),
+ import('js-md5')
+]).then(([esptool,hash])=>({
+ ESPLoader:esptool.ESPLoader,
+ Transport:esptool.Transport,
+ md5:hash.md5
+}));
 const supported=isSecureContext && 'serial' in navigator;
 $('support').textContent=supported?'先选择硬件、连接设备并检查固件，再点击确认开始刷写。连接检查会使设备进入刷写模式，但不会写入 Flash。':'当前浏览器不支持在线刷写。请用电脑 Chrome / Edge 打开此 HTTPS 页面，或下载固件包。';
 function update(){const install=document.querySelector('input[name=mode]:checked').value==='install';$('installNote').hidden=$('confirmRow').hidden=!install;$('flash').disabled=busy||refreshing||!currentManifest||!!session||!supported||!$('hardware').checked||(install&&!$('installConfirm').checked);document.querySelectorAll('input,select').forEach(x=>x.disabled=busy||!!session||refreshing);$('confirmFlash').disabled=busy||!session?.ready;$('cancelFlash').disabled=busy;$('refreshVersion').disabled=busy||!!session||refreshing;}
@@ -50,10 +57,11 @@ $('flash').addEventListener('click',async()=>{
  try{
  const install=document.querySelector('input[name=mode]:checked').value==='install';
  const port=await navigator.serial.requestPort();
+ const {ESPLoader,Transport,md5}=await loadFlashTools();
  status('下载并校验固件…');const manifest=await refreshVersion();log('固件 v'+manifest.version+' · 网页 20261114.1 · 波特率 115200');const board=BOARDS[boardId];const parts=selectedParts(manifest,install);
  const expected=install?board.addresses:[board.app];if(JSON.stringify(parts.map(p=>p.address))!==JSON.stringify(expected))throw Error('固件清单分区不符合预期');
  const files=await Promise.all(parts.map(async p=>({address:p.address,data:await binary(p)})));
- const transport=new Transport(port,true);const loader=new ESPLoader({transport,baudrate:115200,terminal:{clean(){},write:log,writeLine:log},debugLogging:false});session={transport,loader,files,boardId,ready:false};status('正在连接 '+board.name+'…');await loader.main();if(loader.chip.CHIP_NAME!==board.chip)throw Error('芯片与所选硬件不符，已停止，未写入');
+ const transport=new Transport(port,true);const loader=new ESPLoader({transport,baudrate:115200,terminal:{clean(){},write:log,writeLine:log},debugLogging:false});session={transport,loader,files,boardId,md5,ready:false};status('正在连接 '+board.name+'…');await loader.main();if(loader.chip.CHIP_NAME!==board.chip)throw Error('芯片与所选硬件不符，已停止，未写入');
  const detected=await loader.detectFlashSize();if(!detected||!/^\d+MB$/.test(detected)||parseInt(detected,10)<16)throw Error('本版需要至少 16MB Flash，检测到 '+(detected||'未知容量')+'，未写入');
  let migrated=false;
  if(!install){status('检查现有分区…');const plan=partitionPlan(await loader.readFlash(0x8000,0x1000),boardId);if(!plan)throw Error('分区不兼容，未写入。请备份并核对原固件布局。');if(plan==='migrate'){const table=manifest.parts.find(p=>p.address===0x8000);const data=await binary(table);if(partitionPlan(data,boardId)!=='current')throw Error('新相册分区校验失败，未写入');if(boardId==='m5-fire'){const boot=manifest.parts.find(p=>p.address===0x1000);files.push({address:boot.address,data:await binary(boot)});}files.push({address:0x8000,data});migrated=true;}}
@@ -65,7 +73,7 @@ $('flash').addEventListener('click',async()=>{
  finally{busy=false;update();if(session?.ready)$('confirmFlash').focus();}
 });
 $('confirmFlash').addEventListener('click',async()=>{
- if(busy||!session?.ready)return;busy=true;update();const {loader,files,transport}=session;
+ if(busy||!session?.ready)return;busy=true;update();const {loader,files,transport,md5}=session;
  try{
  status('正在写入，请勿断开 USB…');await loader.writeFlash({fileArray:files,flashMode:'dio',flashFreq:'80m',flashSize:BOARDS[session.boardId].flashSize,eraseAll:false,compress:true,calculateMD5Hash:data=>md5(data),reportProgress:(i,w,total)=>{$('progress').value=100*(i+w/total)/files.length;$('status').textContent='正在写入第 '+(i+1)+'/'+files.length+' 个文件 · '+Math.round(100*w/total)+'% · 请勿断开 USB';}});
  $('progress').value=100;status('写入及校验完成，正在重启设备…');try{await restartDevice(transport,loader);status('写入及校验成功，已发送重启信号。请查看设备屏幕确认启动。');}catch(e){log(e.message);status('固件写入及校验成功，但自动重启失败。请手动重启设备，无需重复刷写。');}

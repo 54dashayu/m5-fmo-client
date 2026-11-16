@@ -32,6 +32,21 @@ extern void ui_gallery_worker_tick(void);
 #include "battery.h"
 #include "side_leds.h"
 #include "esp_heap_caps.h"
+
+#ifndef CONFIG_FMO_BOARD_XINGZHI
+// Allocation hooks must not allocate or log: retain only numeric evidence.
+static atomic_uint heap_failures,heap_failed_bytes,heap_failed_caps;
+static void heap_failed(size_t bytes,uint32_t caps,const char *fn){
+ (void)fn;atomic_fetch_add(&heap_failures,1);atomic_store(&heap_failed_bytes,bytes);atomic_store(&heap_failed_caps,caps);
+}
+#endif
+#ifdef CONFIG_FMO_BOARD_XINGZHI
+#define FMO_MQTT_RX_BYTES 4096
+#else
+// MQTT_EVENT_DATA reassembles bounded voice packets across input chunks.
+// Keep CONNECT output large enough for the signed certificate package.
+#define FMO_MQTT_RX_BYTES 1024
+#endif
 #include "relays.h"
 #include "discovery.h"
 #include "driver/uart.h"
@@ -189,6 +204,7 @@ static void worker(void*a){(void)a;
 #ifdef FMO_SSTV_STREAMING
  ui_gallery_worker_tick();
  prefetch=sstv_store_prefetch_tick();
+ if(sstv_rx_preview_tick())prefetch=true;
 #endif
 #endif
  if(network_started){update_ap();auto_relay_tick();profile_switch_tick();enrollment_tick();if(!(xEventGroupGetBits(events)&2))discovery_tick();}if(xQueueReceive(jobs,&candidate,pdMS_TO_TICKS(prefetch?5:1000))){wifi_retry_at=0;netmsg("正在连接新网络，请稍候…");if(!network_started){if(network_attempted){netmsg("请重启设备后重试联网，USB 管理仍可用");crypto_wipe(&candidate,sizeof(candidate));xEventGroupClearBits(events,2);continue;}network_attempted=true;uint8_t failures=0;nvs_get_u8(nv,"net_failures",&failures);if(failures<255)failures++;nvs_set_u8(nv,"net_failures",failures);nvs_commit(nv);vTaskDelay(pdMS_TO_TICKS(400));esp_err_t start=network_start();if(start!=ESP_OK){netmsg("Wi-Fi 启动失败，USB 管理仍可用");crypto_wipe(&candidate,sizeof(candidate));xEventGroupClearBits(events,2);continue;}network_started=true;nvs_set_u8(nv,"net_failures",0);nvs_set_u8(nv,"net_pending",0);nvs_commit(nv);}esp_wifi_disconnect();vTaskDelay(pdMS_TO_TICKS(200));xEventGroupClearBits(events,1);esp_wifi_set_config(WIFI_IF_STA,&candidate);esp_err_t r=esp_wifi_connect();bool ok=r==ESP_OK&&(xEventGroupWaitBits(events,1,pdFALSE,pdTRUE,pdMS_TO_TICKS(22000))&1);if(ok){xSemaphoreTake(api_lock,portMAX_DELAY);r=profile_save(&candidate,true);if(r==ESP_OK)r=nvs_set_blob(nv,"wifi",&candidate,sizeof(candidate));if(r==ESP_OK)r=nvs_commit(nv);if(r==ESP_OK){nvs_set_u8(nv,"net_pending",0);nvs_commit(nv);saved=candidate;have_saved=true;xSemaphoreTake(lock,portMAX_DELAY);snprintf(view.ssid,sizeof(view.ssid),"%.*s",32,candidate.sta.ssid);xSemaphoreGive(lock);netmsg("连接成功，Wi-Fi 已保存");}else netmsg("已连接，但保存失败；原设置保留");xSemaphoreGive(api_lock);}else{netmsg("连接暂未成功，将尝试其他已保存网络");esp_wifi_disconnect();wifi_retry_at=esp_timer_get_time();}crypto_wipe(&candidate,sizeof(candidate));xEventGroupClearBits(events,2);}else wifi_auto_tick();}}
@@ -549,6 +565,26 @@ static esp_err_t gallery_storage(request_t*r,const char *op){
  return err?fail(r,err):success(r,"存储操作完成，请刷新相册");
 }
 static esp_err_t dispatch(request_t*r,const char*op){
+ if(!strcmp(op,"audio_diagnostics")&&r->usb){
+  if(!auth(r))return ESP_OK;
+  voice_view_t v;voice_view(&v);cJSON*j=cJSON_CreateObject();
+#define AUDIO_FIELD(k) cJSON_AddNumberToObject(j,#k,v.k)
+  AUDIO_FIELD(rx_packets);AUDIO_FIELD(rx_frames_received);AUDIO_FIELD(rx_wire_gap_us_max);AUDIO_FIELD(rx_age_us_max);AUDIO_FIELD(rx_queue_peak_bytes);
+  AUDIO_FIELD(rx_overflow);AUDIO_FIELD(rx_late);AUDIO_FIELD(rx_rejected);AUDIO_FIELD(rx_oversized);AUDIO_FIELD(rx_underflows);AUDIO_FIELD(rx_rebuffers);AUDIO_FIELD(rx_duplicates);
+  AUDIO_FIELD(decoded_frames);AUDIO_FIELD(decoded_samples);AUDIO_FIELD(decode_errors);AUDIO_FIELD(decode_us_max);AUDIO_FIELD(decode_slow_frames);AUDIO_FIELD(last_codec);
+  AUDIO_FIELD(play_gap_us_max);AUDIO_FIELD(play_late_feeds);AUDIO_FIELD(pcm_samples_written);AUDIO_FIELD(output_errors);AUDIO_FIELD(dac_rate);AUDIO_FIELD(dma_rate);
+#undef AUDIO_FIELD
+
+#ifndef CONFIG_FMO_BOARD_XINGZHI
+  cJSON_AddNumberToObject(j,"heap_failures",atomic_load(&heap_failures));
+  cJSON_AddNumberToObject(j,"heap_failed_bytes",atomic_load(&heap_failed_bytes));
+  cJSON_AddNumberToObject(j,"heap_failed_caps",atomic_load(&heap_failed_caps));
+  cJSON_AddNumberToObject(j,"internal_free",heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
+  cJSON_AddNumberToObject(j,"internal_largest",heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
+  cJSON_AddNumberToObject(j,"audio_stack_free",voice_stack_free());
+#endif
+  return response(r,j);
+ }
 #ifdef FMO_FULL_SSTV
  if(atomic_load(&card_job_active)){if(!auth(r))return ESP_OK;return fail(r,"TF 卡操作进行中，请等待完成");}
 #endif
@@ -614,6 +650,9 @@ static esp_err_t dispatch(request_t*r,const char*op){
   cJSON_AddBoolToObject(j,"enabled",d.enabled);cJSON_AddBoolToObject(j,"ready",d.ready);
 #define SSTV_FIELD(name) cJSON_AddNumberToObject(j,#name,d.name)
   SSTV_FIELD(init_error);SSTV_FIELD(internal_free);SSTV_FIELD(internal_largest);SSTV_FIELD(samples);SSTV_FIELD(stream_breaks);SSTV_FIELD(timeouts);SSTV_FIELD(drops);SSTV_FIELD(clipped);SSTV_FIELD(max_process_us);SSTV_FIELD(max_store_us);SSTV_FIELD(store_stalls);SSTV_FIELD(max_feed_gap_us);SSTV_FIELD(snapshots);SSTV_FIELD(snapshot_misses);SSTV_FIELD(preview_nonzero);SSTV_FIELD(lines);SSTV_FIELD(leader_max);SSTV_FIELD(vis_starts);SSTV_FIELD(vis_code);SSTV_FIELD(frequency);SSTV_FIELD(status);
+#ifdef FMO_SSTV_STREAMING
+ SSTV_FIELD(preview_high_rows);SSTV_FIELD(preview_skipped);SSTV_FIELD(preview_replay_rows);SSTV_FIELD(preview_read_errors);
+#endif
 #undef SSTV_FIELD
 #ifdef CONFIG_FMO_BOARD_XINGZHI
 #define UI_FIELD(name) cJSON_AddNumberToObject(j,#name,atomic_load(&name))
@@ -781,7 +820,7 @@ static bool discovery_identity(const relay_t*t,char**password,char call[8],uint3
 static void mqtt_worker(void*a){(void)a;esp_mqtt_client_handle_t client=NULL;int64_t next=0;char*active_bundle=NULL;uint32_t active_revision=0;unsigned attempts=0;
  while(1){vTaskDelay(pdMS_TO_TICKS(1000));device_view_t v;device_web_view(&v);if(v.mqtt_online)attempts=0;xSemaphoreTake(api_lock,portMAX_DELAY);bool valid=bundle&&!identity_restart_pending&&!auto_connection_blocked&&time(NULL)>1700000000;if(valid){identity_state();valid=certificate_valid;}relay_t target;uint32_t revision;relays_current(&target,&revision);bool changed=active_bundle&&(!bundle||strcmp(active_bundle,bundle)||revision!=active_revision);
  if(changed){next=0;attempts=0;}if(client&&(!v.online||!valid||changed||(atomic_load(&mqtt_phase)==LINK_FAILED&&esp_timer_get_time()>next))){ESP_LOGW(TAG,"MQTT recycle wifi=%d valid=%d changed=%d phase=%d",v.online,valid,changed,atomic_load(&mqtt_phase));voice_connected(false);xSemaphoreTake(mqtt_lock,portMAX_DELAY);active_mqtt=NULL;esp_mqtt_client_stop(client);esp_mqtt_client_destroy(client);client=NULL;xSemaphoreGive(mqtt_lock);free(active_bundle);active_bundle=NULL;relay_msg("等待连接测试台",false);}
- if(!client){if(!v.online)relay_msg("等待 Wi-Fi 连接",false);else if(!bundle)relay_msg("等待导入设备证书",false);else if(time(NULL)<1700000000)relay_msg("等待网络校时",false);else if(!valid)relay_msg("证书无效，无法接入",false);else if(esp_timer_get_time()>next){uint32_t uid=0;char*password=mqtt_password(&uid,&target);if(password&&uid==target.uid){crypto_wipe(password,strlen(password));free(password);password=NULL;relay_msg("设备与服务器 UID 冲突",false);}if(password){char id[48],uri[100];snprintf(uri,sizeof(uri),"mqtt://%s:%d",target.host,target.port);snprintf(id,sizeof(id),"M5-%lu",(unsigned long)uid);esp_mqtt_client_config_t cfg={.broker.address.uri=uri,.credentials.username=callsign,.credentials.client_id=id,.credentials.authentication.password=password,.network.disable_auto_reconnect=true,.session.keepalive=30,.buffer.size=4096,.outbox.limit=1600,.task.stack_size=8192};client=esp_mqtt_client_init(&cfg);crypto_wipe(password,strlen(password));free(password);if(client){active_revision=revision;voice_identity(uid,callsign,target.uid);char display[13];station_display_call(display,callsign,atomic_load(&station_prefix));voice_display_call(display);xSemaphoreTake(mqtt_lock,portMAX_DELAY);active_mqtt=client;xSemaphoreGive(mqtt_lock);active_bundle=strdup(bundle);esp_mqtt_client_register_event(client,ESP_EVENT_ANY_ID,mqtt_event,NULL);relay_msg("正在认证并连接测试台",false);atomic_store(&mqtt_phase,LINK_CONNECTING);mqtt_target=target;if(esp_mqtt_client_start(client)!=ESP_OK){atomic_store(&mqtt_phase,LINK_FAILED);xSemaphoreTake(mqtt_lock,portMAX_DELAY);active_mqtt=NULL;esp_mqtt_client_destroy(client);client=NULL;xSemaphoreGive(mqtt_lock);free(active_bundle);active_bundle=NULL;}}}next=esp_timer_get_time()+(attempts==0?20000000:attempts==1?40000000:60000000);if(attempts<3)attempts++;}}
+ if(!client){if(!v.online)relay_msg("等待 Wi-Fi 连接",false);else if(!bundle)relay_msg("等待导入设备证书",false);else if(time(NULL)<1700000000)relay_msg("等待网络校时",false);else if(!valid)relay_msg("证书无效，无法接入",false);else if(esp_timer_get_time()>next){uint32_t uid=0;char*password=mqtt_password(&uid,&target);if(password&&uid==target.uid){crypto_wipe(password,strlen(password));free(password);password=NULL;relay_msg("设备与服务器 UID 冲突",false);}if(password){char id[48],uri[100];snprintf(uri,sizeof(uri),"mqtt://%s:%d",target.host,target.port);snprintf(id,sizeof(id),"M5-%lu",(unsigned long)uid);esp_mqtt_client_config_t cfg={.broker.address.uri=uri,.credentials.username=callsign,.credentials.client_id=id,.credentials.authentication.password=password,.network.disable_auto_reconnect=true,.session.keepalive=30,.buffer.size=FMO_MQTT_RX_BYTES,.buffer.out_size=4096,.outbox.limit=1600,.task.stack_size=8192};client=esp_mqtt_client_init(&cfg);crypto_wipe(password,strlen(password));free(password);if(client){active_revision=revision;voice_identity(uid,callsign,target.uid);char display[13];station_display_call(display,callsign,atomic_load(&station_prefix));voice_display_call(display);xSemaphoreTake(mqtt_lock,portMAX_DELAY);active_mqtt=client;xSemaphoreGive(mqtt_lock);active_bundle=strdup(bundle);esp_mqtt_client_register_event(client,ESP_EVENT_ANY_ID,mqtt_event,NULL);relay_msg("正在认证并连接测试台",false);atomic_store(&mqtt_phase,LINK_CONNECTING);mqtt_target=target;if(esp_mqtt_client_start(client)!=ESP_OK){atomic_store(&mqtt_phase,LINK_FAILED);xSemaphoreTake(mqtt_lock,portMAX_DELAY);active_mqtt=NULL;esp_mqtt_client_destroy(client);client=NULL;xSemaphoreGive(mqtt_lock);free(active_bundle);active_bundle=NULL;}}}next=esp_timer_get_time()+(attempts==0?20000000:attempts==1?40000000:60000000);if(attempts<3)attempts++;}}
  xSemaphoreGive(api_lock);}
 }
 static esp_err_t apply_profile_switch(void){
@@ -799,6 +838,10 @@ static esp_err_t apply_profile_switch(void){
  size=32;if(e==ESP_OK)e=nvs_get_blob(nv,seed_key,seed,&size);if(e==ESP_OK)e=nvs_set_blob(nv,"seed",seed,32);crypto_wipe(seed,32);if(e==ESP_OK)e=nvs_set_str(nv,"callsign",call);if(e==ESP_OK)e=nvs_set_str(nv,"cert",raw);if(e==ESP_OK)e=nvs_set_u8(nv,"relay_notice",1);if(e==ESP_OK){e=nvs_erase_key(nv,"enroll_req");if(e==ESP_ERR_NVS_NOT_FOUND)e=ESP_OK;}if(e==ESP_OK)e=nvs_commit(nv);if(e==ESP_OK)e=nvs_erase_key(nv,"profile_next");if(e==ESP_OK)e=nvs_commit(nv);cJSON_Delete(b);free(raw);return e;
 }
 esp_err_t device_web_start(void){
+
+#ifndef CONFIG_FMO_BOARD_XINGZHI
+ ESP_RETURN_ON_ERROR(heap_caps_register_failed_alloc_callback(heap_failed),TAG,"heap diagnostics");
+#endif
  lock=xSemaphoreCreateMutex();mqtt_lock=xSemaphoreCreateMutex();api_lock=xSemaphoreCreateMutex();events=xEventGroupCreate();jobs=xQueueCreate(1,sizeof(wifi_config_t));if(!lock||!mqtt_lock||!api_lock||!events||!jobs)return ESP_ERR_NO_MEM;
  ESP_RETURN_ON_ERROR(nvs_flash_init(),TAG,"NVS init failed");ESP_RETURN_ON_ERROR(nvs_open("m5fmo_v1",NVS_READWRITE,&nv),TAG,"NVS open failed");
  uint8_t media=0;if(nvs_get_u8(nv,"sstv_media",&media)==ESP_OK&&(media==1||media==2))sstv_store_select(media==2);

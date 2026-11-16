@@ -8,6 +8,7 @@ pre=r'''
 #define GALLERY_PREVIEW_WIDTH 80
 #define GALLERY_PREVIEW_HEIGHT 60
 static uint8_t gallery_sides[2][40*30];static int gallery_side_ready[2]={1,1};
+static bool sstv_redraw_pending;static bool preview_busy;static bool sharp_mode;
 static int page;enum{GALLERY=1};
 static uint8_t gallery_buffer[80*60];static uint8_t *gallery_pixels=gallery_buffer;
 #include <stddef.h>
@@ -27,6 +28,8 @@ static lv_area_t clip={0,30,319,209};static lv_draw_ctx_t context={&clip};
 static lv_draw_ctx_t *lv_event_get_draw_ctx(lv_event_t*e){(void)e;return &context;}
 static lv_obj_t *lv_event_get_target(lv_event_t*e){(void)e;return NULL;}
 static uint8_t *sstv_rx_pixels(void){return pixels;}
+static bool sstv_rx_preview_high_row(unsigned row,uint16_t*out){if(!sharp_mode)return false;for(unsigned x=0;x<240;x++)out[x]=(row*240+x)&65535;return true;}
+static bool sstv_rx_preview_row(unsigned row,uint8_t*out){if(preview_busy)return false;assert(row<SSTV_PREVIEW_HEIGHT);memcpy(out,pixels+row*SSTV_PREVIEW_WIDTH,SSTV_PREVIEW_WIDTH);return true;}
 static void lv_obj_get_coords(lv_obj_t*o,lv_area_t*b){(void)o;*b=(lv_area_t){0,30,319,209};}
 static uint16_t lv_color_make(unsigned r,unsigned g,unsigned b){return (r>>3)<<11|(g>>2)<<5|(b>>3);}
 static void lv_draw_sw_blend(lv_draw_ctx_t*c,const lv_draw_sw_blend_dsc_t*d){const lv_area_t*b=d->blend_area;assert(d->opa==255&&d->blend_mode==0&&b->x2-b->x1+1==(page==GALLERY?320:240));assert(b->y1>=c->clip_area->y1&&b->y2<=c->clip_area->y2);memcpy(rendered+(b->y1-30)*320+b->x1,d->src_buf,(b->x2-b->x1+1)*2);rows++;}
@@ -47,6 +50,9 @@ for(unsigned y=0;y<180;y++)for(unsigned x=0;x<320;x++){
 }
 clip.y1=99;clip.y2=106;rows=0;image_draw(NULL);assert(rows==8);
 gallery_side_ready[0]=gallery_side_ready[1]=0;clip.y1=30;clip.y2=209;image_draw(NULL);assert(rendered[80*320+20]==lv_color_make(13,21,29));
+page=0;preview_busy=true;sstv_redraw_pending=false;rows=0;image_draw(NULL);assert(rows==0&&sstv_redraw_pending);preview_busy=false;rows=0;image_draw(NULL);assert(rows==180);
+sharp_mode=true;preview_busy=true;rows=0;image_draw(NULL);assert(rows==180);
+for(unsigned y=0;y<180;y++)for(unsigned x=0;x<240;x++)assert(rendered[y*320+x+40]==((y*240+x)&65535));
 puts("PASS M5 row rendering: RX scaling preserved; three gallery images, 120x90 centered focus/border, 80x60 sides, empty sides and clipped redraw");}
 '''
 with tempfile.TemporaryDirectory() as td:

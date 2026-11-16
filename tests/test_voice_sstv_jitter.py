@@ -14,7 +14,7 @@ pre=r'''
 #define portEXIT_CRITICAL(x) ((void)0)
 #define pdMS_TO_TICKS(x) (x)
 static struct{int64_t arrival;}packet;
-static struct{unsigned rx_underflows,dropped,rx_late;}state;
+static struct{unsigned rx_underflows,dropped,rx_late,rx_age_us_max;}state;
 static unsigned breaks,reads,silence;static bool stale;
 static bool receive_packet(void*p,unsigned wait){(void)p;(void)wait;return reads++!=0;}
 static int64_t esp_timer_get_time(void){return stale?2000001:260000;}

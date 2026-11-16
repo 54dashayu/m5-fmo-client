@@ -427,7 +427,7 @@ $('stationGrid').oninput=()=>{$('stationGrid').setCustomValidity('');};
 $('stationGrid').onchange=()=>{try{stationGridChanged();$('stationFeedback').textContent='网格已填写，请保存资料。';}catch(e){$('stationFeedback').textContent=e.message;}};
 $('stationLat').oninput=$('stationLon').oninput=stationCoordinatesChanged;
 $('stationMap').onclick=()=>{
- const u=new URL('https://app.bh1jss.net/m5-flasher/grid-map/');
+ const u=new URL('https://bh1jss.net/m5-flasher/grid-map/');
  stationMapNonce=Array.from(crypto.getRandomValues(new Uint32Array(4)),n=>n.toString(16).padStart(8,'0')).join('');
  const q=new URLSearchParams({origin:location.origin,nonce:stationMapNonce});
  const lat=String($('stationLat').value).trim(),lon=String($('stationLon').value).trim();

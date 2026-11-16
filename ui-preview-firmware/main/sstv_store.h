@@ -23,6 +23,7 @@ bool sstv_stream_prepare(void);
 bool sstv_stream_begin(const char *relay);
 bool sstv_stream_rows(unsigned first,const uint8_t *pixels);
 bool sstv_stream_finish(uint32_t at);
+bool sstv_stream_preview_rows(unsigned first,unsigned count,uint16_t *out);
 bool sstv_stream_save(uint32_t *id);
 void sstv_stream_discard(void);
 bool sstv_store_preview(uint32_t id,uint8_t *indexed);

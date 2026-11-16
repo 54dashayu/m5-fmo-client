@@ -6,7 +6,7 @@
 typedef union {
  struct {uint8_t pixels[80*60],sides[2][40*30];} gallery;
  uint8_t tx_rows[11][640];
- struct {sstv_decoder_t decoder;uint8_t preview[SSTV_PREVIEW_BYTES];} rx;
+ struct {sstv_decoder_t decoder;uint8_t preview[SSTV_PREVIEW_BYTES];uint16_t high_rows[2][240];} rx;
 } sstv_m5_workspace_t;
 extern sstv_m5_workspace_t sstv_m5_workspace;
 extern atomic_int sstv_m5_workspace_owner;

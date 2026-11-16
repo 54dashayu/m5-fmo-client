@@ -2,20 +2,20 @@
 
 让 M5 FIRE 类和 Xingzhi Cube 小智硬件通过 Wi-Fi 独立接入 FMO 中继，使用内置麦克风与扬声器通联。共用源码、分别构建两种板型固件，不能交叉刷写。
 
-**当前版本：M5 / 小智 0.7.74。** 新增 Robot36 SSTV 接收、设备和网页相册、相框导出与浏览器直传照片墙；支持连续等待、手动保存中断图片和资源容量显示。小智修正屏幕传输缓冲及调度等待，呼号与 SSTV 实时显示已通过真机确认。
+**当前版本：M5 / 小智 0.7.75。** 支持 Robot36 SSTV 收发、设备和网页相册、相框导出与浏览器直传照片墙；支持连续等待、手动保存中断图片和资源容量显示。小智修正屏幕传输缓冲及调度等待，呼号与 SSTV 实时显示已通过真机确认。
 
 | 在线刷写硬件选择 | 芯片与外设 | 固件包 |
 | --- | --- | --- |
-| M5GO / FIRE 类 | 16MB Flash ESP32，320×240，GPIO34 模拟麦克风 / GPIO25 DAC，灯条 | `fmo-m5-fire-v0.7.74.zip` |
-| 小智 Xingzhi Cube 1.54 TFT WiFi | ESP32-S3 R8N16，240×240，I2S 麦克风/扬声器，三键 | `fmo-xingzhi-cube-1.54tft-wifi-v0.7.74.zip` |
+| M5GO / FIRE 类 | 16MB Flash ESP32，320×240，GPIO34 模拟麦克风 / GPIO25 DAC，灯条 | `fmo-m5-fire-v0.7.75.zip` |
+| 小智 Xingzhi Cube 1.54 TFT WiFi | ESP32-S3 R8N16，240×240，I2S 麦克风/扬声器，三键 | `fmo-xingzhi-cube-1.54tft-wifi-v0.7.75.zip` |
 
 仅限以上确切板型；M5 Core2/CoreS3 和其他小智设备不能直接等同兼容。已有 FMO 用户选择保留配置升级；原厂小智首次安装前先做整机备份。
 
-[在线刷写](https://app.bh1jss.net/m5-flasher/) · [下载固件](https://github.com/54dashayu/m5-fmo-client/releases/latest) · [刷机与编译](docs/BUILD.md) · [配网和操作](docs/USER_GUIDE.md) · [证书说明](docs/CERTIFICATES.md) · [版本记录](CHANGELOG.md) · [正式版发布流程](docs/RELEASE.md)
+[在线刷写](https://bh1jss.net/m5-flasher/) · [下载固件](https://github.com/54dashayu/m5-fmo-client/releases/latest) · [刷机与编译](docs/BUILD.md) · [配网和操作](docs/USER_GUIDE.md) · [证书说明](docs/CERTIFICATES.md) · [版本记录](CHANGELOG.md) · [正式版发布流程](docs/RELEASE.md)
 
 > **发布门禁：** 拟发布提交的 GitHub `host-tests` 和 `firmware` 必须全部通过，才能发布正式版并更新在线刷写页面。详见[发布流程](docs/RELEASE.md)。
 
-0.7.74 默认使用中国 APRS 入口，可选择中国、亚洲、全球或自定义服务器；升级保留已保存设置。见 [更新说明](docs/RELEASE_0.7.74.md)。
+0.7.75 保留中国 APRS 默认入口，可选择中国、亚洲、全球或自定义服务器；升级保留已保存设置。见 [更新说明](docs/RELEASE_0.7.75.md)。
 
 ## 小智与 M5 实机
 
@@ -265,4 +265,4 @@ BH1JSS、BI4TES 的申请与领取任务分别持久保存，切换身份不会�
 
 ## SSTV 合并开发版
 
-基于 0.7.74 的 SSTV 合并开发版为 `0.7.75-dev.20`。板型功能差异、测试结果及已知发射限制见 [合并说明](docs/SSTV_0.7.74_INTEGRATION.md)。公开稳定版仍为 0.7.74。
+SSTV 功能已由用户确认 M5、小智均收发正常并验收通过，统一发布为 `0.7.75` 稳定版。支持网页内嵌裁剪上传和三图相册，TF 卡仅限 M5；M5 接收预览为 240×180。刷写页只提供最新稳定版，不保留测试版。研发与验证记录见 [合并说明](docs/SSTV_0.7.74_INTEGRATION.md)。

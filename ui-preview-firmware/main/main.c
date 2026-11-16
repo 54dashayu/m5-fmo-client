@@ -86,6 +86,7 @@ static lv_obj_t *sstv_image;
 static lv_img_dsc_t sstv_image_desc;
 static sstv_status_t sstv_status;
 static unsigned sstv_lines,sstv_generation;
+static bool sstv_redraw_pending;
 static uint32_t sstv_saved;
 static char image_notice[112];
 static bool sstv_start_failed;
@@ -146,8 +147,12 @@ static void image_draw(lv_event_t *event){
  int first=ctx->clip_area->y1>box.y1?ctx->clip_area->y1-box.y1:0;
  int last=ctx->clip_area->y2<box.y1+(int)height-1?ctx->clip_area->y2-box.y1:(int)height-1;
  for(int y=first;y<=last;y++){
+  uint16_t high_row[240];bool sharp=page!=GALLERY&&sstv_rx_preview_high_row(y,high_row);
+  uint8_t rx_row[SSTV_PREVIEW_WIDTH];
+  if(page!=GALLERY&&!sharp&&!sstv_rx_preview_row(y*SSTV_PREVIEW_HEIGHT/180,rx_row)){sstv_redraw_pending=true;return;}
   for(unsigned x=0;x<width;x++){
-   if(page!=GALLERY){uint8_t v=pixels[(y*SSTV_PREVIEW_HEIGHT/180)*SSTV_PREVIEW_WIDTH+x*SSTV_PREVIEW_WIDTH/240];row[x]=lv_color_make((v>>5)*255/7,((v>>2)&7)*255/7,(v&3)*255/3);continue;}
+   if(sharp){unsigned v=high_row[x];row[x]=lv_color_make(((v>>11)&31)*255/31,((v>>5)&63)*255/63,(v&31)*255/31);continue;}
+   if(page!=GALLERY){uint8_t v=rx_row[x*SSTV_PREVIEW_WIDTH/240];row[x]=lv_color_make((v>>5)*255/7,((v>>2)&7)*255/7,(v&3)*255/3);continue;}
    row[x]=lv_color_make(13,21,29);
    if(x>=98&&x<222&&y>=43&&y<137&&(x<100||x>=220||y<45||y>=135)){row[x]=lv_color_make(88,214,178);continue;}
    const uint8_t *src=NULL;unsigned at=0;
@@ -160,6 +165,14 @@ static void image_draw(lv_event_t *event){
  }
 }
 static void image_changed(void){if(sstv_image)lv_obj_invalidate(sstv_image);}
+static void image_changed_strip(unsigned first,unsigned count){
+ if(!sstv_image||lv_obj_has_flag(sstv_image,LV_OBJ_FLAG_HIDDEN))return;
+ lv_area_t box;lv_obj_get_coords(sstv_image,&box);
+ lv_area_t strip={box.x1+40,box.y1+(int)first,box.x1+279,box.y1+(int)(first+count)-1};
+ // Fixed, untransformed screen coordinates. Object invalidation expands by 5px
+ // and would redraw adjacent rows for which the two-line cache has no pixels.
+ _lv_inv_area(lv_obj_get_disp(sstv_image),&strip);
+}
 static void ensure_image(void){
  if(sstv_image||(page!=GALLERY&&!sstv_rx_pixels()))return;
  sstv_image=lv_obj_create(lv_scr_act());lv_obj_remove_style_all(sstv_image);lv_obj_set_size(sstv_image,320,180);
@@ -556,8 +569,14 @@ static void refresh(void){
  ui_mark(4);relay_t relay;int current=relays_current(&relay,NULL);ui_mark(5);
  if(shown!=page){lv_obj_set_pos(brand,12,8);lv_obj_set_width(brand,FMO_WIDTH-24);lv_obj_set_style_text_align(brand,LV_TEXT_ALIGN_LEFT,0);lv_obj_set_width(lines[0],FMO_WIDTH-24);if(sstv_image){if(page==SSTV||page==GALLERY)lv_obj_clear_flag(sstv_image,LV_OBJ_FLAG_HIDDEN);else lv_obj_add_flag(sstv_image,LV_OBJ_FLAG_HIDDEN);}for(int i=0;i<5;i++){lv_label_set_text(lines[i],"");lv_obj_set_pos(lines[i],12,70+i*27);lv_obj_set_style_text_color(lines[i],lv_color_hex(0xecf2f8),0);lv_obj_set_style_text_font(lines[i],(page==RELAYS||page==DISCOVER||page==CA_LIST||page==CA_CONFIRM||page==IDENTITY)?&relay_font:&status_font,0);lv_label_set_long_mode(lines[i],FMO_WIDTH==240?LV_LABEL_LONG_SCROLL_CIRCULAR:LV_LABEL_LONG_DOT);}shown=page;bool is_home=page==HOME;if(is_home)lv_obj_clear_flag(home,LV_OBJ_FLAG_HIDDEN);else lv_obj_add_flag(home,LV_OBJ_FLAG_HIDDEN);lv_obj_t*old[]={brand,title,footer,lines[0],lines[1],lines[2],lines[3],lines[4]};for(unsigned i=0;i<8;i++){if(is_home)lv_obj_add_flag(old[i],LV_OBJ_FLAG_HIDDEN);else lv_obj_clear_flag(old[i],LV_OBJ_FLAG_HIDDEN);}}
  if(page==SSTV_TX_PAGE){refresh_sstv_tx();return;}
+#ifdef FMO_SSTV_STREAMING
+ if(page!=SSTV){
+#endif
  lv_label_set_text_fmt(brand,(page==RELAYS||page==DISCOVER)?"体系：%s":FMO_BOARD_TITLE " · %s",(page==RELAYS||page==DISCOVER)?relays_profile_name():FMO_VERSION);
  lv_obj_set_pos(footer,12,220);lv_obj_set_style_text_font(footer,&status_font,0);lv_obj_set_style_text_color(footer,lv_color_hex(0x70d5ae),0);lv_label_set_text(footer,"长按 A 返回       B 确认");
+#ifdef FMO_SSTV_STREAMING
+ }
+#endif
  if(page==HOME){
   refresh_home(&v,&a,&relay);
  }else if(page==MEDIA){
@@ -571,11 +590,19 @@ static void refresh(void){
   for(int i=0;i<4;i++){lv_label_set_text_fmt(lines[i],"%s %s",selection==i?">":" ",choices[i]);}
   lv_label_set_text(footer,"A 上项  B 确认  C 下项");
  }else if(page==SSTV){
+#ifndef FMO_SSTV_STREAMING
   lv_label_set_text(title,"SSTV / Robot36");lv_label_set_text_fmt(brand,"当前中继：%s / %lu",relay.call,(unsigned long)relay.uid);
+#endif
   unsigned before=sstv_generation;
   if(!sstv_start_failed&&sstv_rx_snapshot(&sstv_status,&sstv_lines,&sstv_generation)){
-   ensure_image();if(sstv_image)lv_obj_clear_flag(sstv_image,LV_OBJ_FLAG_HIDDEN);
-   if(before!=sstv_generation||sstv_status==SSTV_RECEIVING||sstv_status==SSTV_COMPLETE){image_changed();if(!sstv_saved)image_notice[0]=0;}
+   ensure_image();if(sstv_image&&lv_obj_has_flag(sstv_image,LV_OBJ_FLAG_HIDDEN))lv_obj_clear_flag(sstv_image,LV_OBJ_FLAG_HIDDEN);
+   if(before!=sstv_generation||sstv_redraw_pending){
+#ifdef FMO_SSTV_STREAMING
+    if(sstv_lines<=2||sstv_redraw_pending)image_changed();
+#else
+    image_changed();
+#endif
+    sstv_redraw_pending=false;if(!sstv_saved)image_notice[0]=0;}
   }
   if(sstv_start_failed)lv_label_set_text(lines[0],sstv_store_error()?"相册未就绪，请在网页处理":image_notice);
   else if(image_notice[0])lv_label_set_text(lines[0],image_notice);
@@ -585,10 +612,24 @@ static void refresh(void){
 #else
   else lv_label_set_text_fmt(lines[0],"%s  %u/240",sstv_status==SSTV_RECEIVING?"接收中":sstv_status==SSTV_COMPLETE?"接收完成":sstv_status==SSTV_INTERRUPTED?"中断，等待新信号":"等待信号",sstv_lines);
 #endif
+#ifndef FMO_SSTV_STREAMING
   lv_obj_set_y(lines[0],64);
+#endif
 #ifdef FMO_FULL_SSTV
-  lv_obj_add_flag(title,LV_OBJ_FLAG_HIDDEN);lv_label_set_text(brand,"SSTV");lv_obj_set_pos(brand,FMO_WIDTH-50,7);lv_obj_set_width(brand,42);lv_obj_set_style_text_align(brand,LV_TEXT_ALIGN_RIGHT,0);
-  lv_obj_set_pos(lines[0],8,7);lv_obj_set_width(lines[0],FMO_WIDTH-68);lv_obj_set_y(footer,lv_disp_get_ver_res(NULL)-19);
+  lv_obj_add_flag(title,LV_OBJ_FLAG_HIDDEN);lv_label_set_text(brand,"SSTV");lv_obj_set_pos(brand,FMO_WIDTH-50,
+#ifdef FMO_SSTV_STREAMING
+ 3
+#else
+ 7
+#endif
+ );lv_obj_set_width(brand,42);lv_obj_set_style_text_align(brand,LV_TEXT_ALIGN_RIGHT,0);
+#ifdef FMO_SSTV_STREAMING
+  // Leave the label's invalidation padding outside the pixel preview.
+  lv_obj_set_y(brand,3);lv_obj_set_pos(lines[0],8,3);
+#else
+  lv_obj_set_pos(lines[0],8,7);
+#endif
+  lv_obj_set_width(lines[0],FMO_WIDTH-68);lv_obj_set_y(footer,lv_disp_get_ver_res(NULL)-19);
 #endif
 #ifdef FMO_FULL_SSTV
   lv_label_set_text(footer,sstv_status==SSTV_COMPLETE?(sstv_saved?"A 退出  C 继续":"A 退出  B 保存  C 继续"):sstv_status==SSTV_INTERRUPTED?"A退出 B存残图 C重试":"A 退出");
@@ -604,10 +645,18 @@ static void refresh(void){
 #endif
   lv_label_set_text_fmt(title,"Gallery  %d/%d",gallery_count>0?selection+1:0,gallery_count>0?gallery_count:0);
   if(image_notice[0])lv_label_set_text(lines[0],image_notice);else if(gallery_count>0)lv_label_set_text_fmt(lines[0],"Robot36 · 图片 #%lu",(unsigned long)gallery_entries[selection].id);
+#ifndef FMO_SSTV_STREAMING
   lv_obj_set_y(lines[0],64);
+#endif
 #ifdef FMO_FULL_SSTV
   if(!image_notice[0]){if(gallery_count>0&&gallery_entries[selection].partial)lv_label_set_text_fmt(lines[0],"残图 %u/240行",gallery_entries[selection].received_lines);else lv_label_set_text(lines[0],"SSTV相册");}
-  lv_obj_add_flag(title,LV_OBJ_FLAG_HIDDEN);lv_label_set_text_fmt(brand,"%d/%d",gallery_count>0?selection+1:0,gallery_count>0?gallery_count:0);lv_obj_set_pos(brand,FMO_WIDTH-50,7);lv_obj_set_width(brand,42);lv_obj_set_style_text_align(brand,LV_TEXT_ALIGN_RIGHT,0);lv_obj_set_pos(lines[0],8,7);lv_obj_set_width(lines[0],FMO_WIDTH-68);lv_obj_set_y(footer,lv_disp_get_ver_res(NULL)-19);
+  lv_obj_add_flag(title,LV_OBJ_FLAG_HIDDEN);lv_label_set_text_fmt(brand,"%d/%d",gallery_count>0?selection+1:0,gallery_count>0?gallery_count:0);lv_obj_set_pos(brand,FMO_WIDTH-50,
+#ifdef FMO_SSTV_STREAMING
+ 3
+#else
+ 7
+#endif
+ );lv_obj_set_width(brand,42);lv_obj_set_style_text_align(brand,LV_TEXT_ALIGN_RIGHT,0);lv_obj_set_pos(lines[0],8,7);lv_obj_set_width(lines[0],FMO_WIDTH-68);lv_obj_set_y(footer,lv_disp_get_ver_res(NULL)-19);
 #endif
   lv_label_set_text(footer,"A 上张  B 选择  C 下张");
 #ifdef FMO_FULL_SSTV
@@ -724,11 +773,12 @@ void app_main(void){
  ui_mark(6);int64_t render_start=esp_timer_get_time();
 #endif
 #ifdef FMO_SSTV_STREAMING
- if(page!=SSTV)lv_timer_handler();
- else if(sstv_rx_display_lock()){lv_timer_handler();sstv_rx_display_unlock();}
-#else
- lv_timer_handler();
+ if(page==SSTV&&sstv_image){unsigned first,count;if(sstv_rx_preview_dirty(&first,&count)){
+  image_changed_strip(first,count);
+ }}
 #endif
+/* Only changed 240-pixel strips are redrawn; no TF reads in the UI task. */
+ lv_timer_handler();
 #ifdef CONFIG_FMO_BOARD_XINGZHI
  ui_max(&ui_render_max_ms,(unsigned)((esp_timer_get_time()-render_start)/1000));ui_mark(0);
 #endif

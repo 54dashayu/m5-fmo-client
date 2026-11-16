@@ -8,6 +8,6 @@
   },
   "private": true,
   "scripts": {
-    "build": "esbuild app.js --bundle --format=esm --minify --outfile=public/app.js"
+    "build": "rm -rf public/assets && esbuild app.js --bundle --format=esm --minify --splitting --outdir=public --entry-names=app --chunk-names=assets/[name]-[hash]"
   }
 }
