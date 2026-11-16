@@ -10,7 +10,7 @@ static bool failure(void *ctx,uint8_t *p,size_t n){(void)ctx;(void)p;(void)n;ret
 int main(void){
  char dir[]="/tmp/fmo-sstv-tx-XXXXXX";assert(mkdtemp(dir));assert(!sstv_store_init(dir));uint32_t id;
  assert(sstv_store_import(source,NULL,123456,&id)&&id==1&&received==153600);
- sstv_reader_t *r=sstv_store_reader_open(id);assert(r);uint8_t row[640];for(unsigned y=0;y<240;y++){assert(sstv_store_reader_row(r,y,row));for(unsigned x=0;x<640;x++)assert(row[x]==(y*640+x)%251);}assert(!sstv_store_reader_row(r,240,row));sstv_store_reader_close(r);
+ sstv_reader_t *r=sstv_store_reader_open(id);assert(r);uint8_t row[640];for(unsigned y=0;y<240;y++){assert(sstv_store_reader_row(r,y,row));for(unsigned x=0;x<640;x++)assert(row[x]==(y*640+x)%251);}unsigned order[]={0,239,17,18,18,0};for(unsigned k=0;k<sizeof(order)/sizeof(order[0]);k++){unsigned y=order[k];assert(sstv_store_reader_row(r,y,row));for(unsigned x=0;x<640;x++)assert(row[x]==(y*640+x)%251);}assert(!sstv_store_reader_row(r,240,row));sstv_store_reader_close(r);
  uint8_t thumb[80*60];assert(sstv_store_thumbnail(1,thumb,80,60));for(unsigned y=0;y<60;y++)for(unsigned x=0;x<80;x++){unsigned at=(y*4*320+x*4)*2,v=at%251|((at+1)%251)<<8,r=(v>>11)*255/31,g=((v>>5)&63)*255/63,b=(v&31)*255/31;assert(thumb[y*80+x]==((r&224)|((g>>3)&28)|(b>>6)));}
  char cache[300];snprintf(cache,sizeof(cache),"%s/fmo-thumb-00000001.bin",dir);FILE*cf=fopen(cache,"rb");assert(cf);fseek(cf,0,SEEK_END);assert(ftell(cf)==4828);fclose(cf);
  uint8_t side[40*30];assert(sstv_store_thumbnail(1,side,40,30));for(unsigned y=0;y<30;y++)for(unsigned x=0;x<40;x++)assert(side[y*40+x]==thumb[y*2*80+x*2]);

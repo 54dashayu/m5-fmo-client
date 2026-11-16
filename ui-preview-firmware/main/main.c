@@ -345,7 +345,7 @@ static void build_home(void){
  if(FMO_WIDTH==320){build_wide_home();return;}
  build_compact_home();
 }
-#ifdef CONFIG_FMO_BOARD_XINGZHI
+#if defined(CONFIG_FMO_BOARD_XINGZHI) || defined(CONFIG_IDF_TARGET_ESP32)
 /* Avoid restarting layout/animations and allocating identical text every poll. */
 static void home_text(lv_obj_t*o,const char*t){if(strcmp(lv_label_get_text(o),t))lv_label_set_text(o,t);}
 static void home_text_fmt(lv_obj_t*o,const char*fmt,...){char text[256];va_list args;va_start(args,fmt);vsnprintf(text,sizeof(text),fmt,args);va_end(args);home_text(o,text);}
@@ -527,11 +527,25 @@ else go(HOME);}return;}
  if(page==VOLUME){if(k==0)voice_volume(-5);if(k==2)voice_volume(5);if(k==1)voice_mute();return;}
  if(k==1)go(HOME);
 }
+static void refresh_sstv_tx(void){
+ home_text_fmt(brand,FMO_BOARD_TITLE " · %s",FMO_VERSION);
+ home_pos(footer,12,220);
+
+  bool active;unsigned progress;voice_sstv_status(&active,&progress);home_text(title,tx_launch_failed?"无法开始发射":active?"SSTV 发射中":"SSTV 发射结束");home_text_fmt(lines[0],"图片 #%lu · %u%%",(unsigned long)tx_image_id,progress);home_text(lines[1],tx_launch_failed?"请检查中继及频道状态":active?"正在发送 Robot36":progress==100?"请在接收端确认图片":"发送已停止，请检查状态");home_text(footer,"A 返回  B 停止  C 返回");
+
+}
 static void refresh(void){
 #ifdef FMO_SSTV_STREAMING
  if(page==GALLERY&&atomic_load(&gallery_work)==3){atomic_store(&gallery_work,0);buttons_block(&keys);ensure_image();image_changed();}
 #endif
 
+#ifdef FMO_SSTV_STREAMING
+ bool tx_pending;unsigned tx_progress;voice_sstv_status(&tx_pending,&tx_progress);
+ if(tx_pending&&page==GALLERY&&!atomic_load(&gallery_work)){
+  /* A web-started job must free the gallery workspace without go() cancelling PTT. */
+  gallery_preview_ready=false;sstv_workspace_release(SSTV_WORKSPACE_GALLERY);page=HOME;selection=0;buttons_block(&keys);
+ }
+#endif
  if((page==GALLERY||page==SSTV_TX_CONFIRM)&&gallery_revision!=sstv_store_revision())go(GALLERY);
  ui_mark(2);device_view_t v;device_web_view(&v);ui_mark(3);voice_view_t a;voice_view(&a);
  int64_t now=esp_timer_get_time();bool active=a.tx||a.rx;
@@ -541,6 +555,7 @@ static void refresh(void){
  if(a.rx&&!a.tx)snprintf(held_call,sizeof(held_call),"%s",a.caller[0]?a.caller:"--");
  ui_mark(4);relay_t relay;int current=relays_current(&relay,NULL);ui_mark(5);
  if(shown!=page){lv_obj_set_pos(brand,12,8);lv_obj_set_width(brand,FMO_WIDTH-24);lv_obj_set_style_text_align(brand,LV_TEXT_ALIGN_LEFT,0);lv_obj_set_width(lines[0],FMO_WIDTH-24);if(sstv_image){if(page==SSTV||page==GALLERY)lv_obj_clear_flag(sstv_image,LV_OBJ_FLAG_HIDDEN);else lv_obj_add_flag(sstv_image,LV_OBJ_FLAG_HIDDEN);}for(int i=0;i<5;i++){lv_label_set_text(lines[i],"");lv_obj_set_pos(lines[i],12,70+i*27);lv_obj_set_style_text_color(lines[i],lv_color_hex(0xecf2f8),0);lv_obj_set_style_text_font(lines[i],(page==RELAYS||page==DISCOVER||page==CA_LIST||page==CA_CONFIRM||page==IDENTITY)?&relay_font:&status_font,0);lv_label_set_long_mode(lines[i],FMO_WIDTH==240?LV_LABEL_LONG_SCROLL_CIRCULAR:LV_LABEL_LONG_DOT);}shown=page;bool is_home=page==HOME;if(is_home)lv_obj_clear_flag(home,LV_OBJ_FLAG_HIDDEN);else lv_obj_add_flag(home,LV_OBJ_FLAG_HIDDEN);lv_obj_t*old[]={brand,title,footer,lines[0],lines[1],lines[2],lines[3],lines[4]};for(unsigned i=0;i<8;i++){if(is_home)lv_obj_add_flag(old[i],LV_OBJ_FLAG_HIDDEN);else lv_obj_clear_flag(old[i],LV_OBJ_FLAG_HIDDEN);}}
+ if(page==SSTV_TX_PAGE){refresh_sstv_tx();return;}
  lv_label_set_text_fmt(brand,(page==RELAYS||page==DISCOVER)?"体系：%s":FMO_BOARD_TITLE " · %s",(page==RELAYS||page==DISCOVER)?relays_profile_name():FMO_VERSION);
  lv_obj_set_pos(footer,12,220);lv_obj_set_style_text_font(footer,&status_font,0);lv_obj_set_style_text_color(footer,lv_color_hex(0x70d5ae),0);lv_label_set_text(footer,"长按 A 返回       B 确认");
  if(page==HOME){
@@ -582,8 +597,6 @@ static void refresh(void){
 #endif
  }else if(page==SSTV_TX_CONFIRM){
   lv_label_set_text(title,"发送图片？");lv_label_set_text_fmt(lines[0],"图片 #%lu",(unsigned long)tx_image_id);lv_label_set_text(lines[1],"Robot36 · 约 37 秒");lv_label_set_text(lines[2],"通过当前 FMO 中继发送");lv_label_set_text(footer,"A 返回  B 发射  C 返回");
- }else if(page==SSTV_TX_PAGE){
-  bool active;unsigned progress;voice_sstv_status(&active,&progress);lv_label_set_text(title,tx_launch_failed?"无法开始发射":active?"SSTV 发射中":"SSTV 发射结束");lv_label_set_text_fmt(lines[0],"图片 #%lu · %u%%",(unsigned long)tx_image_id,progress);lv_label_set_text(lines[1],tx_launch_failed?"请检查中继及频道状态":active?"正在发送 Robot36":progress==100?"请在接收端确认图片":"发送已停止，请检查状态");lv_label_set_text(footer,"A 返回  B 停止  C 返回");
  }else if(page==GALLERY){
 #ifdef FMO_SSTV_STREAMING
   if(atomic_load(&gallery_work)){if(sstv_image)lv_obj_add_flag(sstv_image,LV_OBJ_FLAG_HIDDEN);lv_label_set_text(title,"SSTV相册");lv_label_set_text(lines[0],"正在读取图片，请稍候…");lv_label_set_text(footer,"加载完成后再按键");return;}

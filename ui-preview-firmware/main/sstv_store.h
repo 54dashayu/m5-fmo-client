@@ -18,6 +18,7 @@ bool sstv_store_stats(sstv_storage_t *out);
 const char *sstv_store_save_error(void);
 
 #ifdef FMO_SSTV_STREAMING
+bool sstv_store_prefetch_tick(void);
 bool sstv_stream_prepare(void);
 bool sstv_stream_begin(const char *relay);
 bool sstv_stream_rows(unsigned first,const uint8_t *pixels);

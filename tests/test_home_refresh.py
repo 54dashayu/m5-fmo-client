@@ -2,8 +2,9 @@ from pathlib import Path
 import subprocess,tempfile
 r=Path(__file__).resolve().parents[1];m=r/'ui-preview-firmware/main';lv=m.parent/'components/lvgl';s=(m/'main.c').read_text()
 basic=s[s.index('static lv_obj_t *label('):s.index('static void build_wide_home(')]
-helper=s[s.index('#ifdef CONFIG_FMO_BOARD_XINGZHI\n/* Avoid restarting layout/animations'):s.index('static void refresh_home(')]
+helper=s[s.index('#if defined(CONFIG_FMO_BOARD_XINGZHI) || defined(CONFIG_IDF_TARGET_ESP32)\n/* Avoid restarting layout/animations'):s.index('static void refresh_home(')]
 refresh=s[s.index('static void refresh_home('):s.index('static void go(')]
+tx_refresh=s[s.index('static void refresh_sstv_tx(void)'):s.index('static void refresh(void)')]
 home=(m/'boards/xingzhi/home.inc').read_text()
 pre=r'''
 #include "lvgl.h"
@@ -30,6 +31,8 @@ static bool ui_flashing_enabled=true,show_clock=false,ptt_latch=true;static unsi
 static void battery_view(int*p,bool*c){*p=100;*c=false;}
 static int64_t esp_timer_get_time(void){return now;}
 static bool relay_glyph(uint32_t c){(void)c;return true;}
+static bool tx_launch_failed;static uint32_t tx_image_id=3;static unsigned tx_progress=20;
+void voice_sstv_status(bool*a,unsigned*p){*a=true;*p=tx_progress;}
 static lv_color_t pixels[240*240],draw[240*20],expected[240*240];static unsigned long pixels_flushed;
 static void flush(lv_disp_drv_t*d,const lv_area_t*a,lv_color_t*p){for(int y=a->y1;y<=a->y2;y++)for(int x=a->x1;x<=a->x2;x++){pixels[y*240+x]=*p++;pixels_flushed++;}lv_disp_flush_ready(d);}
 '''
@@ -38,8 +41,8 @@ int main(void){lv_init();static lv_disp_draw_buf_t buf;lv_disp_draw_buf_init(&bu
 device_view_t v={.online=true,.mqtt_online=true,.call="BH1JSS",.display_call="E.BH1JSS"};voice_view_t a={.rx=true,.caller="AI-BH1JSS/P",.last_caller="AI-BH1JSS",.previous_caller="BA1ABC",.volume=100};relay_t r={.name="test",.call="BH1JSS",.uid=1791};int min_offset=0;
 for(int i=0;i<1200;i++){now=i*10000LL;lv_tick_inc(10);if(i%15==0)refresh_home(&v,&a,&r);lv_timer_handler();if(((lv_label_t*)call_label)->offset.x<min_offset)min_offset=((lv_label_t*)call_label)->offset.x;}
 assert(min_offset<0);assert(!strcmp(lv_label_get_text(call_label),"AI-BH1JSS/P"));assert(!strcmp(lv_label_get_text(last_call),"AI-BH1JSS"));assert(!strcmp(lv_label_get_text(previous_call),"BA1ABC"));assert(((lv_label_t*)call_label)->offset.y==0);assert(lv_obj_get_height(call_label)==44);
-v.online=false;refresh_home(&v,&a,&r);lv_obj_update_layout(net);assert(!strcmp(lv_label_get_text(net),"未联网"));assert(lv_obj_get_height(net)==ui_small.line_height);lv_point_t net_size;lv_txt_get_size(&net_size,"未联网",&ui_small,0,0,240,0);assert(net_size.x<=lv_obj_get_width(net));unsigned long dirty=pixels_flushed;lv_refr_now(NULL);memcpy(expected,pixels,sizeof(pixels));lv_obj_invalidate(lv_scr_act());lv_refr_now(NULL);assert(!memcmp(expected,pixels,sizeof(pixels)));printf("PASS actual S3 home: scroll minimum=%d; 12s dirty pixels=%lu; current/history labels intact; partial redraw matches full\n",min_offset,dirty);}
+v.online=false;refresh_home(&v,&a,&r);lv_obj_update_layout(net);assert(!strcmp(lv_label_get_text(net),"未联网"));assert(lv_obj_get_height(net)==ui_small.line_height);lv_point_t net_size;lv_txt_get_size(&net_size,"未联网",&ui_small,0,0,240,0);assert(net_size.x<=lv_obj_get_width(net));unsigned long dirty=pixels_flushed;lv_refr_now(NULL);memcpy(expected,pixels,sizeof(pixels));lv_obj_invalidate(lv_scr_act());lv_refr_now(NULL);assert(!memcmp(expected,pixels,sizeof(pixels)));lv_obj_add_flag(home,LV_OBJ_FLAG_HIDDEN);brand=label("",0,0,&status_font,0xffffff);title=label("",0,35,&status_font,0xffffff);lines[0]=label("",0,70,&status_font,0xffffff);lines[1]=label("",0,100,&status_font,0xffffff);footer=label("",0,220,&status_font,0xffffff);refresh_sstv_tx();lv_refr_now(NULL);unsigned long tx_dirty=pixels_flushed;for(int i=0;i<100;i++){refresh_sstv_tx();lv_tick_inc(150);lv_timer_handler();}assert(pixels_flushed==tx_dirty);tx_progress++;refresh_sstv_tx();lv_refr_now(NULL);assert(pixels_flushed>tx_dirty&&pixels_flushed-tx_dirty<240*50);printf("PASS actual SSTV TX page: unchanged polls flush zero pixels; progress only redraws its row\n");printf("PASS actual S3 home: scroll minimum=%d; 12s dirty pixels=%lu; current/history labels intact; partial redraw matches full\n",min_offset,dirty);}
 '''
 with tempfile.TemporaryDirectory() as td:
- d=Path(td);(d/'esp_err.h').write_text('typedef int esp_err_t;\n');(d/'test.c').write_text(pre+basic+home+helper+refresh+post)
+ d=Path(td);(d/'esp_err.h').write_text('typedef int esp_err_t;\n');(d/'test.c').write_text(pre+basic+home+helper+refresh+tx_refresh+post)
  cmd=['cc','-O1','-w','-DLV_CONF_SKIP','-DLV_MEM_CUSTOM=1','-DLV_COLOR_DEPTH=16','-DLV_COLOR_16_SWAP=1','-DLV_IMG_CACHE_DEF_SIZE=0','-I'+td,'-I'+str(lv),'-I'+str(lv.parent),'-I'+str(m),str(d/'test.c'),*[str(p) for p in (lv/'src').rglob('*.c')],*[str(p) for p in (m/'fonts').glob('*.c')],'-lm','-o',td+'/test'];subprocess.run(cmd,check=True);subprocess.run([td+'/test'],check=True,timeout=30)

@@ -28,6 +28,9 @@ static int64_t esp_timer_get_time(void){return now;}
 static void vTaskDelay(int ms){now+=ms*1000;}
 static bool sstv_rx_active(void){return rx_active;}
 static void sstv_rx_break(void){}
+#ifdef FMO_SSTV_STREAMING
+bool sstv_rx_enable(bool on){(void)on;return true;}
+#endif
 static void audio_stop(void){}
 static void notice(const char*s){(void)s;}
 static void reason(const char*s){snprintf(last_reason,sizeof(last_reason),"%s",s);}
@@ -56,5 +59,6 @@ int main(void){int16_t pcm[640];uint8_t frames[656];voice_tx_t q={0};
 '''
 with tempfile.TemporaryDirectory() as td:
  p=Path(td)/'tx.c';p.write_text(pre+code+tail)
- subprocess.run(['cc','-Wall','-Wextra','-Werror','-I'+str(root/'ui-preview-firmware/main'),str(p),str(root/'ui-preview-firmware/main/sstv_encoder.c'),str(root/'ui-preview-firmware/main/voice_wire.c'),'-lm','-o',td+'/test'],check=True)
- subprocess.run([td+'/test'],check=True)
+ for flags in ([],['-DCONFIG_IDF_TARGET_ESP32'],['-DCONFIG_FMO_BOARD_XINGZHI']):
+  subprocess.run(['cc',*flags,'-Wall','-Wextra','-Werror','-I'+str(root/'ui-preview-firmware/main'),str(p),str(root/'ui-preview-firmware/main/sstv_encoder.c'),str(root/'ui-preview-firmware/main/voice_wire.c'),'-lm','-o',td+'/test'],check=True)
+  subprocess.run([td+'/test'],check=True)

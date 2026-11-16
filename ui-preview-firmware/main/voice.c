@@ -167,6 +167,9 @@ static bool sstv_timed_row(void *reader,unsigned row,uint8_t *pixels){
 /* Probe uses the exact source/encoder and pacing, but never queues or publishes audio. */
 static void send_sstv(uint32_t id,uint32_t epoch,int16_t *pcm,uint8_t *frames,voice_tx_t *q){
  audio_stop();sstv_rx_break();notice("SSTV: preparing image");
+#ifdef FMO_SSTV_STREAMING
+ sstv_rx_enable(false); /* Release a diagnostic-only RX preparation before sharing its workspace. */
+#endif
  sstv_reader_t *reader=sstv_store_reader_open(id);sstv_encoder_t *encoder=reader?calloc(1,sizeof(*encoder)):NULL;
  const char *failure=!reader?"sstv_image_open_failed":!encoder?"sstv_no_memory":NULL;
  uint32_t drops=q->dropped,sent=q->sent,retries=q->retries;int predictor=0,index=0;uint16_t sequence=1;bool ok=encoder!=NULL;

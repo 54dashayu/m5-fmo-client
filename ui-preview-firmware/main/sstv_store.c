@@ -223,8 +223,21 @@ bool sstv_store_save(const uint8_t*p,uint32_t at,uint32_t*id){return sstv_store_
 
 #include "sstv_stream_store.inc"
 
-struct sstv_reader { FILE *file; uint8_t *pixels; long offset; bool small; };
-void sstv_store_reader_close(sstv_reader_t *r){if(!r)return;if(r->file)fclose(r->file);free(r->pixels);free(r);
+struct sstv_reader { FILE *file; uint8_t *pixels; long offset; bool small;
+#if defined(FMO_SSTV_STREAMING) && !defined(SSTV_HOST_TEST)
+ bool prefetched;atomic_uint produced,consumed;atomic_bool read_failed;
+#endif
+};
+static bool reader_row_direct(void *ctx,unsigned row,uint8_t *pixels);
+#if defined(FMO_SSTV_STREAMING) && !defined(SSTV_HOST_TEST)
+#include "sstv_prefetch.inc"
+#endif
+void sstv_store_reader_close(sstv_reader_t *r){if(!r)return;
+#if defined(FMO_SSTV_STREAMING) && !defined(SSTV_HOST_TEST)
+ prefetch_stop(r);
+#endif
+ if(r->file)fclose(r->file);
+ free(r->pixels);free(r);
 #ifndef SSTV_HOST_TEST
  xSemaphoreTake(mutex,portMAX_DELAY);
 #endif
@@ -250,14 +263,26 @@ sstv_reader_t *sstv_store_reader_open(uint32_t id){
   }
  }
  if(ok)open_readers++;
- give();if(!ok){if(r){if(r->file)fclose(r->file);free(r->pixels);free(r);}r=NULL;}return r;
+ give();
+#if defined(FMO_SSTV_STREAMING) && !defined(SSTV_HOST_TEST)
+ if(ok&&on_sd&&!prefetch_start(r)){sstv_store_reader_close(r);return NULL;}
+#endif
+ if(!ok){if(r){if(r->file)fclose(r->file);free(r->pixels);free(r);}r=NULL;}return r;
 }
-bool sstv_store_reader_row(void *ctx,unsigned row,uint8_t *pixels){
+static bool reader_row_direct(void *ctx,unsigned row,uint8_t *pixels){
  sstv_reader_t *r=ctx;if(!r||row>=240||!pixels)return false;
  if(r->pixels){memcpy(pixels,r->pixels+row*640,640);return true;}
- if(r->small){uint8_t line[160];if(fseek(r->file,r->offset+(row/2)*160,SEEK_SET)||fread(line,1,160,r->file)!=160)return false;
+ if(r->small){uint8_t line[160];if((ftell(r->file)!=r->offset+(row/2)*160&&fseek(r->file,r->offset+(row/2)*160,SEEK_SET))||fread(line,1,160,r->file)!=160)return false;
   for(unsigned x=0;x<320;x++){unsigned v=line[x/2],c=(((v>>5)*31/7)<<11)|((((v>>2)&7)*63/7)<<5)|((v&3)*31/3);pixels[x*2]=c;pixels[x*2+1]=c>>8;}return true;}
- return fseek(r->file,r->offset+row*640,SEEK_SET)==0&&fread(pixels,1,640,r->file)==640;
+ /* FAT seek invalidates stdio and may walk the cluster chain. Preserve the sequential cursor. */
+ return (ftell(r->file)==r->offset+row*640||fseek(r->file,r->offset+row*640,SEEK_SET)==0)&&fread(pixels,1,640,r->file)==640;
+}
+
+bool sstv_store_reader_row(void *ctx,unsigned row,uint8_t *pixels){
+#if defined(FMO_SSTV_STREAMING) && !defined(SSTV_HOST_TEST)
+ sstv_reader_t*r=ctx;if(r&&r->prefetched)return prefetch_row(r,row,pixels);
+#endif
+ return reader_row_direct(ctx,row,pixels);
 }
 
 bool sstv_store_import(sstv_import_read_t read,void *ctx,uint32_t at,uint32_t *id){
