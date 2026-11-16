@@ -7,7 +7,7 @@ sha=subprocess.check_output(['git','rev-parse','HEAD'],cwd=r,text=True).strip()
 assert not subprocess.check_output(['git','status','--porcelain'],cwd=r,text=True).strip(),'Commit source first'
 versions=[]
 for board,folder,chip,chipid in [('m5-fire','build-m5-regression','ESP32',0),('xingzhi-cube-1.54tft-wifi','build-xingzhi','ESP32-S3',9)]:
- build=r/folder;version=json.loads((build/'project_description.json').read_text())['project_version'];assert version=='0.7.75-dev.19';versions.append(version)
+ build=r/folder;version=json.loads((build/'project_description.json').read_text())['project_version'];assert version=='0.7.75-dev.20';versions.append(version)
  flash=json.loads((build/'flasher_args.json').read_text());base=board+'/v'+version;dest=out/'firmware'/base;dest.mkdir(parents=True,exist_ok=True);parts=[]
  sources=[(int(flash['bootloader']['offset'],16),'bootloader.bin',build/flash['bootloader']['file']),(0x8000,'partition-table.bin',build/flash['partition-table']['file'])]
  if chipid==9:sources.append((0x9000,'initial-settings.bin',None))
@@ -26,5 +26,5 @@ for board,folder,chip,chipid in [('m5-fire','build-m5-regression','ESP32',0),('x
    if p.is_file() and p.suffix!='.zip':z.write(p,p.name)
  with (dest/'SHA256SUMS').open('a') as f:f.write(hashlib.sha256((dest/zipname).read_bytes()).hexdigest()+'  '+zipname+'\n')
 assert len(set(versions))==1
-(out/'app.js').write_text((public/'app.js').read_text().replace('photos/','../photos/').replace('20261114.1','20261116.sstv19'))
+(out/'app.js').write_text((public/'app.js').read_text().replace('photos/','../photos/').replace('20261114.1','20261116.sstv20'))
 print('Packaged aligned SSTV preview:',versions[0],sha)

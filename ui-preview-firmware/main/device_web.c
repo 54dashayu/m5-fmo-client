@@ -493,7 +493,8 @@ typedef struct {httpd_req_t *http;int64_t deadline;} gallery_import_ctx_t;
 static bool import_read(void *ctx,uint8_t *p,size_t n){gallery_import_ctx_t *c=ctx;while(n&&esp_timer_get_time()<c->deadline){int k=httpd_req_recv(c->http,(char*)p,n);if(k==HTTPD_SOCK_ERR_TIMEOUT)continue;if(k<=0)return false;p+=k;n-=k;}return n==0;}
 static esp_err_t gallery_import(httpd_req_t *h){request_t r={.http=h};xSemaphoreTake(api_lock,portMAX_DELAY);bool allowed=auth(&r);xSemaphoreGive(api_lock);if(!allowed)return ESP_OK;
  if(h->content_len!=153600)return fail(&r,"需要 320×240 RGB565 图片");
- if(voice_busy()||sstv_rx_active())return fail(&r,"通联或收图中，请稍后导入");
+ if(sstv_rx_active())return fail(&r,"SSTV 接收模式已开启，请先退出设备的接收页面再导入图片");
+ if(voice_busy())return fail(&r,"设备正在处理音频任务，请结束后再导入图片");
  gallery_import_ctx_t ctx={h,esp_timer_get_time()+120000000};uint32_t id;unsigned revision=sstv_store_revision();
  if(!sstv_store_import(import_read,&ctx,time(NULL),&id))return fail(&r,"导入失败：检查空间、连接或存储卡");
  cJSON*j=cJSON_CreateObject();cJSON_AddBoolToObject(j,"ok",true);cJSON_AddNumberToObject(j,"id",id);cJSON_AddNumberToObject(j,"revision",revision==sstv_store_revision()?revision:0);cJSON_AddStringToObject(j,"medium",sstv_store_on_sd()?"TF card":"Flash");cJSON_AddStringToObject(j,"message","图片已存入设备相册");return response(&r,j);
