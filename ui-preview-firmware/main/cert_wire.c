@@ -55,3 +55,13 @@ const char *wire_validate_bundle(const cJSON*b,const uint8_t own[32],const char*
 }
 
 size_t wire_login_tbs(uint8_t*out,size_t cap,int64_t uid,const char*call,const char*host,int port,const uint8_t sfp[32],int64_t now,const uint8_t ufp[32]){Buf b={out,0,cap,true};head(&b,4,12);text(&b,"FMO");head(&b,0,4);text(&b,"serverAuthorizerReqHttp");head(&b,0,uid);text(&b,call);head(&b,0,uid);text(&b,"user");text(&b,host);head(&b,0,port);bytes(&b,sfp,32);head(&b,0,now);bytes(&b,ufp,32);return b.ok?b.n:0;}
+size_t wire_user_blob(const cJSON*j,uint8_t*out,size_t cap){
+ if(!eq(str(j,"type"),"userCert")||cap<67)return 0;
+ uint8_t sig[64];if(!wire_unb64(str(j,"signature"),sig,64))return 0;
+ size_t n=wire_cert_tbs(j,out,cap-66);if(!n||out[0]!=0x89)return 0;
+ out[0]=0x8a;out[n++]=0x58;out[n++]=64;memcpy(out+n,sig,64);return n+64;
+}
+size_t wire_beacon_tbs(uint8_t*out,size_t cap,const char*call,unsigned ssid,const char*lat,const char*lon,const uint8_t hash[32],const char*freq,unsigned height,const char*rig,const char*ant,int64_t salt){
+ if(ssid>15||salt<0||!wire_callsign(call)||!lat||!lon||!freq||!rig||!ant)return 0;
+ Buf b={out,0,cap,true};head(&b,4,10+(height>0)+(rig[0]!=0)+(ant[0]!=0));text(&b,"FMO");head(&b,0,4);text(&b,"BEACON");text(&b,call);head(&b,0,ssid);text(&b,lat);text(&b,lon);bytes(&b,hash,32);text(&b,freq);if(height)head(&b,0,height);if(*rig)text(&b,rig);if(*ant)text(&b,ant);head(&b,0,salt);return b.ok?b.n:0;
+}

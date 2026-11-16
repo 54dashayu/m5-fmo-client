@@ -13,3 +13,5 @@ size_t wire_cert_tbs(const cJSON *cert,uint8_t *out,size_t cap);
 size_t wire_login_tbs(uint8_t *out,size_t cap,int64_t server_uid,const char *server_call,const char *host,int port,const uint8_t server_fp[32],int64_t now,const uint8_t user_fp[32]);
 
 const char *wire_validate_root(const cJSON *root,int64_t now);
+size_t wire_user_blob(const cJSON *cert,uint8_t*out,size_t cap);
+size_t wire_beacon_tbs(uint8_t*out,size_t cap,const char*call,unsigned ssid,const char*lat,const char*lon,const uint8_t hash[32],const char*freq,unsigned height,const char*rig,const char*ant,int64_t salt);

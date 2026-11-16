@@ -306,7 +306,7 @@ static void refresh_home(const device_view_t*v,const voice_view_t*a,const relay_
  uint32_t accent=a->tx?0xff3030:a->rx?0x20ff70:v->mqtt_online?0x58d6b2:0xa8b5bf;
  uint32_t tint=a->tx?0x441818:a->rx?0x123d25:v->mqtt_online?0x12352f:0x263139;
  int percent;bool charging;battery_view(&percent,&charging);if(percent<0)home_text(battery_label,"--");else home_text_fmt(battery_label,"%d%%%s",percent,charging?"+":"");if(percent<=0)home_visibility(battery_fill,false);else{home_visibility(battery_fill,true);home_width(battery_fill,(18*percent+99)/100);}home_bg_color(battery_fill,lv_color_hex(charging?0x5ceaff:percent<=25?0xff7766:0x58d6b2),0);
- home_text_fmt(local_call,FMO_CALL_PREFIX "%s",v->call);
+ home_text_fmt(local_call,"%s",v->display_call);
  home_text(net,v->online?"Wi-Fi":"未联网");
  home_text_color(net,lv_color_hex(v->online?0x58d6b2:0xffb778),0);
  home_text(caption,a->rx&&!a->tx?"当前通联 · 对方呼号":a->tx?"当前通联 · 本机发话":show_clock?"北京时间":"最近通联");
@@ -314,7 +314,7 @@ static void refresh_home(const device_view_t*v,const voice_view_t*a,const relay_
  home_text_color(badge,lv_color_hex(accent),0);home_bg_color(badge,lv_color_hex(tint),0);
  time_t utc=time(NULL);bool idle=show_clock;bool pending_clock=idle&&utc<1700000000;
  if(a->rx&&!a->tx)home_text(call_label,a->caller[0]?a->caller:"--");
- else if(a->tx)home_text_fmt(call_label,FMO_CALL_PREFIX "%s",v->call);
+ else if(a->tx)home_text_fmt(call_label,"%s",v->display_call);
  else if(!idle)home_text(call_label,held_call);
  else if(pending_clock)home_text(call_label,"等待校时");
  else {time_t china=utc+8*3600;struct tm t;gmtime_r(&china,&t);char clock[16];strftime(clock,sizeof(clock),"%H:%M:%S",&t);home_text(call_label,clock);}
@@ -431,7 +431,7 @@ static void refresh(void){
  int64_t now=esp_timer_get_time();bool active=a.tx||a.rx;
  if(!idle_started||active||was_active){idle_since=now;idle_started=true;}
  was_active=active;show_clock=!active&&now-idle_since>=10000000;
- if(a.tx||!held_call[0])snprintf(held_call,sizeof(held_call),FMO_CALL_PREFIX "%s",v.call);
+ if(a.tx||!held_call[0])snprintf(held_call,sizeof(held_call),"%s",v.display_call);
  if(a.rx&&!a.tx)snprintf(held_call,sizeof(held_call),"%s",a.caller[0]?a.caller:"--");
  ui_mark(4);relay_t relay;int current=relays_current(&relay,NULL);ui_mark(5);
  if(shown!=page){lv_obj_set_pos(brand,12,8);lv_obj_set_width(brand,FMO_WIDTH-24);lv_obj_set_style_text_align(brand,LV_TEXT_ALIGN_LEFT,0);lv_obj_set_width(lines[0],FMO_WIDTH-24);if(sstv_image){if(page==SSTV||page==GALLERY)lv_obj_clear_flag(sstv_image,LV_OBJ_FLAG_HIDDEN);else lv_obj_add_flag(sstv_image,LV_OBJ_FLAG_HIDDEN);}for(int i=0;i<5;i++){lv_label_set_text(lines[i],"");lv_obj_set_pos(lines[i],12,70+i*27);lv_obj_set_style_text_color(lines[i],lv_color_hex(0xecf2f8),0);lv_obj_set_style_text_font(lines[i],(page==RELAYS||page==DISCOVER||page==CA_LIST||page==CA_CONFIRM||page==IDENTITY)?&relay_font:&status_font,0);lv_label_set_long_mode(lines[i],FMO_WIDTH==240?LV_LABEL_LONG_SCROLL_CIRCULAR:LV_LABEL_LONG_DOT);}shown=page;bool is_home=page==HOME;if(is_home)lv_obj_clear_flag(home,LV_OBJ_FLAG_HIDDEN);else lv_obj_add_flag(home,LV_OBJ_FLAG_HIDDEN);lv_obj_t*old[]={brand,title,footer,lines[0],lines[1],lines[2],lines[3],lines[4]};for(unsigned i=0;i<8;i++){if(is_home)lv_obj_add_flag(old[i],LV_OBJ_FLAG_HIDDEN);else lv_obj_clear_flag(old[i],LV_OBJ_FLAG_HIDDEN);}}
@@ -522,7 +522,7 @@ static void refresh(void){
  lv_label_set_text(lines[3],ptt_latch?"短按 B 开始，再按停止":"按住 B 发话，松开停止");lv_label_set_text(lines[4],settings_notice);
  lv_label_set_text(footer,"A 上项 B 更改 C 下项 / 长按A返回");
  }else if(page==VOLUME){lv_label_set_text(title,"音量与静音");lv_label_set_text_fmt(lines[0],"扬声器音量：%d%%",a.volume);lv_label_set_text(lines[1],a.muted?"当前静音":"声音已开启");lv_label_set_text(footer,"A 减小  B 静音  C 增大 / 长按A返回");
- }else if(page==IDENTITY){lv_label_set_text(title,"设备身份");lv_label_set_text_fmt(lines[0],"呼号：" FMO_CALL_PREFIX "%s",v.call);lv_label_set_text(lines[1],v.identity);lv_label_set_text_fmt(lines[2],"当前：%s",ca_current[0]?ca_current:"等待读取");lv_label_set_text(lines[3],"B 切换根 CA");lv_obj_set_style_text_font(lines[3],&font20,0);lv_obj_set_style_text_color(lines[3],lv_color_hex(0xffd166),0);lv_obj_set_pos(lines[3],12,158);lv_label_set_text(lines[4],"切换后自动刷新中继候选");lv_obj_set_pos(lines[4],12,194);lv_label_set_text(footer,"长按 A 返回");
+ }else if(page==IDENTITY){lv_label_set_text(title,"设备身份");lv_label_set_text_fmt(lines[0],"呼号：%s",v.display_call);lv_label_set_text(lines[1],v.identity);lv_label_set_text_fmt(lines[2],"当前：%s",ca_current[0]?ca_current:"等待读取");lv_label_set_text(lines[3],"B 切换根 CA");lv_obj_set_style_text_font(lines[3],&font20,0);lv_obj_set_style_text_color(lines[3],lv_color_hex(0xffd166),0);lv_obj_set_pos(lines[3],12,158);lv_label_set_text(lines[4],"切换后自动刷新中继候选");lv_obj_set_pos(lines[4],12,194);lv_label_set_text(footer,"长按 A 返回");
  }else if(page==CA_LIST){int total=ca_count?ca_count:1,start=selection/4*4;lv_label_set_text_fmt(title,"根 CA 列表 %d/%d",selection/4+1,(total+3)/4);for(int i=0;i<4;i++){int n=start+i;if(n>=ca_count)lv_label_set_text(lines[i],"");else{device_profile_t*p=&ca_profiles[n];lv_label_set_text_fmt(lines[i],"%s %s%s",selection==n?">":" ",p->current?"[当前] ":!p->has_certificate?"[仅根] ":"",p->name);lv_obj_set_style_text_color(lines[i],lv_color_hex(p->current?0xffd166:0xecf2f8),0);}}lv_label_set_text(lines[4],ca_notice[0]?ca_notice:"无证书可选择，再去网页申请");lv_label_set_text(footer,"A 上项  B 确认  C 下项 / 长按A返回");
  }else if(page==CA_CONFIRM){lv_label_set_text(title,"确认切换根 CA");lv_label_set_text(lines[0],ca_target.name);lv_label_set_text(lines[1],ca_target.has_certificate?"迁移身份请确保原设备离线":"原设备证书保留，暂停通联");lv_obj_set_style_text_font(lines[1],&status_font,0);lv_label_set_text(lines[2],"切换后自动重启");lv_label_set_text(lines[3],ca_target.has_certificate?"刷新中继列表":"请到网页申请证书");for(int i=2;i<=3;i++){lv_obj_set_style_text_font(lines[i],&font20,0);lv_obj_set_style_text_color(lines[i],lv_color_hex(0xffd166),0);lv_obj_set_pos(lines[i],12,122+(i-2)*32);}lv_obj_set_pos(lines[4],12,189);lv_obj_set_style_text_font(lines[4],&status_font,0);lv_label_set_text(lines[4],ca_submitted?(v.profile_message[0]?v.profile_message:ca_notice):"A/C 取消，返回体系列表");lv_obj_set_pos(footer,12,214);lv_obj_set_style_text_font(footer,&font20,0);lv_obj_set_style_text_color(footer,lv_color_hex(0xffd166),0);lv_label_set_text(footer,ca_submitted?"正在切换，请稍候":"B 确认切换");
  }else if(page==WEB){lv_label_set_text(title,"网页管理 / 配网");lv_label_set_text_fmt(lines[0],"热点：%s",v.ap);lv_label_set_text_fmt(lines[1],"热点密码 / 管理码：%s",v.code);lv_label_set_text(lines[2],"热点网页：192.168.4.1");lv_label_set_text_fmt(lines[3],"局域网：%s",v.online?v.ip:"等待联网");

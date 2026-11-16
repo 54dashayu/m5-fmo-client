@@ -21,3 +21,5 @@ void voice_mic_test(bool on);
 void voice_tone(void);
 
 uint32_t voice_stack_free(void);
+
+void voice_display_call(const char*display);
