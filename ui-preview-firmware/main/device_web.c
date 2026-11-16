@@ -260,7 +260,7 @@ static esp_err_t network_action(request_t*r,bool remove){if(!auth(r))return ESP_
 
 static void identity_restart_task(void*a){(void)a;vTaskDelay(pdMS_TO_TICKS(1500));esp_restart();}
 typedef struct {uint32_t version;bool enabled;int32_t passcode;uint16_t port;char host[64];} station_tx_config_t;
-static station_tx_config_t tx_config={.version=1,.passcode=-1,.port=14580,.host="srvr.aprs-is.net"};
+static station_tx_config_t tx_config={.version=1,.passcode=-1,.port=14580,.host="china.aprs2.net"};
 static bool tx_host_valid(const char*s){if(!s||!*s||strlen(s)>63)return false;for(const char*p=s;*p;p++)if(!isalnum((unsigned char)*p)&&*p!='.'&&*p!='-')return false;return true;}
 static bool tx_busy(void){if(identity_restart_pending||voice_busy())return true;
 #ifdef FMO_FULL_SSTV

@@ -13,6 +13,12 @@ const window={addEventListener(){}};const status=async()=>{};const showTab=()=>{
 tail=r'''
 (async()=>{
  await loadStation();assert.equal($('stationLat').value,0);assert.equal($('stationSsid').children.length,16);
+ assert.equal($('broadcastPreset').value,'custom');assert.equal($('broadcastHost').readOnly,false); // Existing server retained
+ for(const host of broadcastPresets){$('broadcastPreset').value=host;$('broadcastPreset').onchange();assert.equal(broadcastDraft().host,host);assert.equal(broadcastDraft().port,14580);assert($('broadcastHost').readOnly);}
+ $('broadcastPreset').value='custom';$('broadcastPreset').onchange();assert.equal($('broadcastHost').value,'srvr.aprs-is.net');
+ fillBroadcastServer('custom.example.net',12345);$('broadcastPreset').value='china.aprs2.net';$('broadcastPreset').onchange();$('broadcastPreset').value='custom';$('broadcastPreset').onchange();assert.equal(broadcastDraft().host,'custom.example.net');assert.equal(broadcastDraft().port,12345);
+ fillBroadcastServer('china.aprs2.net',12345);assert.equal($('broadcastPreset').value,'custom');
+ fillBroadcastServer('china.aprs2.net',14580);assert.equal($('broadcastPreset').value,'china.aprs2.net');
  $('stationLat').value='0';$('stationLon').value='0';$('stationFreq').value='438.5';$('stationHeight').value='10';$('stationPrefix').checked=false;$('stationSsid').value='7';
  const ev={preventDefault(){},target:new El()};await $('stationForm').onsubmit(ev);let v=calls.findLast(c=>c.path==='/api/station'&&c.method==='POST').body;assert.equal(v.prefix,false);assert.equal(v.aprsSsid,7);assert.equal(v.latitude,0);assert.equal(v.longitude,0);
  const before=calls.length;$('stationLon').value='';stationCoordinatesChanged();await $('stationForm').onsubmit(ev);assert.equal(calls.length,before);assert($('stationFeedback').textContent.includes('一起'));
