@@ -23,3 +23,9 @@ void voice_tone(void);
 uint32_t voice_stack_free(void);
 
 void voice_display_call(const char*display);
+
+bool voice_sstv_start(uint32_t id);
+void voice_sstv_stop(void);
+void voice_sstv_status(bool *active,unsigned *progress);
+
+#include "voice_sstv_diag.h"

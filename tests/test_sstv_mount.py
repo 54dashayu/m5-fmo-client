@@ -3,7 +3,7 @@ from pathlib import Path
 import subprocess,tempfile
 root=Path(__file__).resolve().parents[1]
 s=(root/'ui-preview-firmware/main/sstv_store.c').read_text()
-code=s[s.index('const char *sstv_store_init('):s.index('static int list(')]
+code=s[s.index('const char *sstv_store_init('):s.index('static int list_page(')]
 pre=r'''
 #include <assert.h>
 #include <stdbool.h>
@@ -22,6 +22,9 @@ typedef int esp_err_t;
 typedef struct {unsigned address,size;} esp_partition_t;
 typedef struct {const char*base_path,*partition_label;int max_files;bool format_if_mount_failed;} esp_vfs_spiffs_conf_t;
 typedef int DIR;
+static bool on_sd,sd_available,force_flash;
+static bool esp_spiffs_mounted(const char*p){(void)p;return false;}
+static const char *sstv_sd_mount(void){return sd_available?"/sdcard/fmo-sstv":NULL;}
 static int mutex,mount_result,read_result,formatted,blank,creates;static bool needs_initialization;
 static char directory[256];static const char *error="uninitialized",*partition_label="spiffs";
 static esp_partition_t part={0x400000,0x400000};
@@ -43,6 +46,7 @@ int main(void){
  assert(sstv_store_initialize_confirmed());assert(formatted==1);assert(creates==1);
  mount_result=ESP_FAIL;blank=1;assert(!sstv_store_init(NULL));assert(formatted==2);
  mount_result=0;blank=0;assert(!sstv_store_init(NULL));assert(formatted==2);
+ sd_available=true;mount_result=ESP_FAIL;assert(!sstv_store_init(NULL));assert(on_sd&&!strcmp(directory,"/sdcard/fmo-sstv")&&formatted==2);
  puts("PASS mount: memory/read errors never erase; existing bytes require confirmation; exact album partition only; valid album preserved; mutex reused");
 }
 '''

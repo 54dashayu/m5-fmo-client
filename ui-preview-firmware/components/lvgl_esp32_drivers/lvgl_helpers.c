@@ -50,6 +50,9 @@
  **********************/
 
 /* Interface and driver initialization */
+/* Board override: initialize shared-bus peripherals before LCD traffic. */
+void __attribute__((weak)) lvgl_spi_bus_ready(void) {}
+
 void lvgl_driver_init(void)
 {
     /* Since LVGL v8 LV_HOR_RES_MAX and LV_VER_RES_MAX are not defined, so
@@ -104,6 +107,7 @@ void lvgl_driver_init(void)
         SPI_BUS_MAX_TRANSFER_SZ, 1,
         DISP_SPI_IO2, DISP_SPI_IO3);
 
+    lvgl_spi_bus_ready();
     disp_spi_add_device(TFT_SPI_HOST);
 
     disp_driver_init();

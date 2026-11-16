@@ -260,7 +260,14 @@ static void LV_ATTRIBUTE_FAST_MEM draw_letter_normal(lv_draw_ctx_t * draw_ctx, c
 
     lv_coord_t hor_res = lv_disp_get_hor_res(_lv_refr_get_disp_refreshing());
     uint32_t mask_buf_size = box_w * box_h > hor_res ? hor_res : box_w * box_h;
+    /* M5 has no PSRAM. Keep the <=320-byte glyph mask off its fragmented heap. */
+#if defined(CONFIG_IDF_TARGET_ESP32)
+    lv_opa_t local_mask[320];
+    lv_opa_t * mask_buf = mask_buf_size <= sizeof(local_mask) ? local_mask : lv_mem_buf_get(mask_buf_size);
+#else
     lv_opa_t * mask_buf = lv_mem_buf_get(mask_buf_size);
+#endif
+    if(mask_buf == NULL) return;
     blend_dsc.mask_buf = mask_buf;
     int32_t mask_p = 0;
 
@@ -348,7 +355,11 @@ static void LV_ATTRIBUTE_FAST_MEM draw_letter_normal(lv_draw_ctx_t * draw_ctx, c
         mask_p = 0;
     }
 
+#if defined(CONFIG_IDF_TARGET_ESP32)
+    if(mask_buf != local_mask) lv_mem_buf_release(mask_buf);
+#else
     lv_mem_buf_release(mask_buf);
+#endif
 }
 
 #if LV_DRAW_COMPLEX && LV_USE_FONT_SUBPX

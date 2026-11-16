@@ -32,3 +32,7 @@ CONFIG_LV_MEM_CUSTOM=y
 # Runtime metrics require the FreeRTOS task-information API.
 CONFIG_FREERTOS_USE_TRACE_FACILITY=y
 CONFIG_FREERTOS_USE_STATS_FORMATTING_FUNCTIONS=y
+
+# SD cards use 512-byte logical sectors; share FATFS cache to preserve audio RAM.
+CONFIG_FATFS_SECTOR_512=y
+CONFIG_FATFS_PER_FILE_CACHE=n

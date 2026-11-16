@@ -1,4 +1,5 @@
 #include "sstv_rx.h"
+#include "voice.h"
 #include "sdkconfig.h"
 #include "sstv_store.h"
 #include <time.h>
@@ -175,6 +176,7 @@ memcpy(preview
 }
 
 bool sstv_rx_enable(bool on){
+    if(on&&voice_busy())return false;
     if(on&&!sstv_rx_init())return false;
 #ifdef FMO_SSTV_STREAMING
     if(on&&!sstv_stream_prepare())return false;

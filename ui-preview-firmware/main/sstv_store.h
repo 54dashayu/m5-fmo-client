@@ -13,7 +13,7 @@ bool sstv_store_delete(uint32_t id);
 
 bool sstv_store_save_relay(const uint8_t *pixels,uint32_t at,uint32_t *id,const char *relay);
 
-typedef struct { size_t total,used,safe_limit; unsigned count,remaining; bool low; } sstv_storage_t;
+typedef struct { uint64_t total,used,safe_limit; unsigned count,remaining; bool low; } sstv_storage_t;
 bool sstv_store_stats(sstv_storage_t *out);
 const char *sstv_store_save_error(void);
 
@@ -36,3 +36,28 @@ bool sstv_stream_finish_partial(uint32_t at);
 
 bool sstv_store_needs_initialization(void);
 const char *sstv_store_initialize_confirmed(void);
+
+/* Validated immutable read session. Close after cancellation/completion. */
+typedef struct sstv_reader sstv_reader_t;
+sstv_reader_t *sstv_store_reader_open(uint32_t id);
+bool sstv_store_reader_row(void *reader,unsigned row,uint8_t *pixels);
+void sstv_store_reader_close(sstv_reader_t *reader);
+
+int sstv_store_page(sstv_entry_t *out,uint32_t before);
+bool sstv_store_on_sd(void);
+
+typedef bool (*sstv_import_read_t)(void *,uint8_t *,size_t);
+bool sstv_store_import(sstv_import_read_t read,void *ctx,uint32_t at,uint32_t *id);
+
+int sstv_store_newer(sstv_entry_t *out,uint32_t after);
+
+const char *sstv_store_select(bool sd);
+const char *sstv_store_card_manage(bool format);
+
+unsigned sstv_store_revision(void);
+
+/* Small RGB332 thumbnail, verified before display; streaming M5 only. */
+bool sstv_store_thumbnail(uint32_t id,uint8_t *pixels,unsigned width,unsigned height);
+
+/* Adjacent image ID, wrapping at album ends; zero for empty/busy storage. */
+uint32_t sstv_store_neighbor(uint32_t id,bool newer);

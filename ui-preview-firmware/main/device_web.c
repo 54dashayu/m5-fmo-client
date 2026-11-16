@@ -3,6 +3,7 @@
 #include "sstv_store.h"
 #ifdef FMO_FULL_SSTV
 #include "sstv_codec.h"
+#include "sstv_sd.h"
 #endif
 #include "sstv_rx.h"
 #include <stdbool.h>
@@ -18,6 +19,13 @@ extern unsigned ui_key_layout;extern bool ui_screen_sleeping;extern bool ui_flas
 #include <stdatomic.h>
 enum { LINK_IDLE, LINK_CONNECTING, LINK_READY, LINK_FAILED };
 static atomic_int mqtt_phase=LINK_IDLE;
+#ifdef FMO_FULL_SSTV
+static atomic_bool card_worker_ready;
+static void card_job_tick(void);
+#ifdef FMO_SSTV_STREAMING
+extern void ui_gallery_worker_tick(void);
+#endif
+#endif
 #include "device_web.h"
 #include "voice.h"
 #include "voice_wire.h"
@@ -170,7 +178,18 @@ static void wifi_auto_tick(void){
  netmsg(result==ESP_OK?"正在尝试已保存的 Wi-Fi…":"Wi-Fi 暂未连接，将尝试其他保存网络");
  xEventGroupClearBits(events,2);
 }
-static void worker(void*a){(void)a;wifi_config_t candidate;network_attempted=true;if(network_start()==ESP_OK)network_started=true;else netmsg("Wi-Fi 启动失败，请重启设备");while(1){if(network_started){update_ap();auto_relay_tick();profile_switch_tick();enrollment_tick();if(!(xEventGroupGetBits(events)&2))discovery_tick();}if(xQueueReceive(jobs,&candidate,pdMS_TO_TICKS(1000))){wifi_retry_at=0;netmsg("正在连接新网络，请稍候…");if(!network_started){if(network_attempted){netmsg("请重启设备后重试联网，USB 管理仍可用");crypto_wipe(&candidate,sizeof(candidate));xEventGroupClearBits(events,2);continue;}network_attempted=true;uint8_t failures=0;nvs_get_u8(nv,"net_failures",&failures);if(failures<255)failures++;nvs_set_u8(nv,"net_failures",failures);nvs_commit(nv);vTaskDelay(pdMS_TO_TICKS(400));esp_err_t start=network_start();if(start!=ESP_OK){netmsg("Wi-Fi 启动失败，USB 管理仍可用");crypto_wipe(&candidate,sizeof(candidate));xEventGroupClearBits(events,2);continue;}network_started=true;nvs_set_u8(nv,"net_failures",0);nvs_set_u8(nv,"net_pending",0);nvs_commit(nv);}esp_wifi_disconnect();vTaskDelay(pdMS_TO_TICKS(200));xEventGroupClearBits(events,1);esp_wifi_set_config(WIFI_IF_STA,&candidate);esp_err_t r=esp_wifi_connect();bool ok=r==ESP_OK&&(xEventGroupWaitBits(events,1,pdFALSE,pdTRUE,pdMS_TO_TICKS(22000))&1);if(ok){xSemaphoreTake(api_lock,portMAX_DELAY);r=profile_save(&candidate,true);if(r==ESP_OK)r=nvs_set_blob(nv,"wifi",&candidate,sizeof(candidate));if(r==ESP_OK)r=nvs_commit(nv);if(r==ESP_OK){nvs_set_u8(nv,"net_pending",0);nvs_commit(nv);saved=candidate;have_saved=true;xSemaphoreTake(lock,portMAX_DELAY);snprintf(view.ssid,sizeof(view.ssid),"%.*s",32,candidate.sta.ssid);xSemaphoreGive(lock);netmsg("连接成功，Wi-Fi 已保存");}else netmsg("已连接，但保存失败；原设置保留");xSemaphoreGive(api_lock);}else{netmsg("连接暂未成功，将尝试其他已保存网络");esp_wifi_disconnect();wifi_retry_at=esp_timer_get_time();}crypto_wipe(&candidate,sizeof(candidate));xEventGroupClearBits(events,2);}else wifi_auto_tick();}}
+static void worker(void*a){(void)a;
+#ifdef FMO_FULL_SSTV
+ atomic_store(&card_worker_ready,true);
+#endif
+ wifi_config_t candidate;network_attempted=true;if(network_start()==ESP_OK)network_started=true;else netmsg("Wi-Fi 启动失败，请重启设备");while(1){
+#ifdef FMO_FULL_SSTV
+ card_job_tick();
+#ifdef FMO_SSTV_STREAMING
+ ui_gallery_worker_tick();
+#endif
+#endif
+ if(network_started){update_ap();auto_relay_tick();profile_switch_tick();enrollment_tick();if(!(xEventGroupGetBits(events)&2))discovery_tick();}if(xQueueReceive(jobs,&candidate,pdMS_TO_TICKS(1000))){wifi_retry_at=0;netmsg("正在连接新网络，请稍候…");if(!network_started){if(network_attempted){netmsg("请重启设备后重试联网，USB 管理仍可用");crypto_wipe(&candidate,sizeof(candidate));xEventGroupClearBits(events,2);continue;}network_attempted=true;uint8_t failures=0;nvs_get_u8(nv,"net_failures",&failures);if(failures<255)failures++;nvs_set_u8(nv,"net_failures",failures);nvs_commit(nv);vTaskDelay(pdMS_TO_TICKS(400));esp_err_t start=network_start();if(start!=ESP_OK){netmsg("Wi-Fi 启动失败，USB 管理仍可用");crypto_wipe(&candidate,sizeof(candidate));xEventGroupClearBits(events,2);continue;}network_started=true;nvs_set_u8(nv,"net_failures",0);nvs_set_u8(nv,"net_pending",0);nvs_commit(nv);}esp_wifi_disconnect();vTaskDelay(pdMS_TO_TICKS(200));xEventGroupClearBits(events,1);esp_wifi_set_config(WIFI_IF_STA,&candidate);esp_err_t r=esp_wifi_connect();bool ok=r==ESP_OK&&(xEventGroupWaitBits(events,1,pdFALSE,pdTRUE,pdMS_TO_TICKS(22000))&1);if(ok){xSemaphoreTake(api_lock,portMAX_DELAY);r=profile_save(&candidate,true);if(r==ESP_OK)r=nvs_set_blob(nv,"wifi",&candidate,sizeof(candidate));if(r==ESP_OK)r=nvs_commit(nv);if(r==ESP_OK){nvs_set_u8(nv,"net_pending",0);nvs_commit(nv);saved=candidate;have_saved=true;xSemaphoreTake(lock,portMAX_DELAY);snprintf(view.ssid,sizeof(view.ssid),"%.*s",32,candidate.sta.ssid);xSemaphoreGive(lock);netmsg("连接成功，Wi-Fi 已保存");}else netmsg("已连接，但保存失败；原设置保留");xSemaphoreGive(api_lock);}else{netmsg("连接暂未成功，将尝试其他已保存网络");esp_wifi_disconnect();wifi_retry_at=esp_timer_get_time();}crypto_wipe(&candidate,sizeof(candidate));xEventGroupClearBits(events,2);}else wifi_auto_tick();}}
 static esp_err_t response(request_t*q,cJSON*j){if(q->usb){q->output=j;return ESP_OK;}httpd_req_t*r=q->http;char*s=cJSON_PrintBuffered(j,256,false);cJSON_Delete(j);if(!s)return httpd_resp_send_err(r,HTTPD_500_INTERNAL_SERVER_ERROR,"memory");httpd_resp_set_type(r,"application/json; charset=utf-8");httpd_resp_set_hdr(r,"Cache-Control","no-store");httpd_resp_set_hdr(r,"X-Content-Type-Options","nosniff");esp_err_t e=httpd_resp_sendstr(r,s);free(s);return e;}
 static esp_err_t fail(request_t*r,const char*message){if(r->http)httpd_resp_set_status(r->http,"400 Bad Request");cJSON*j=cJSON_CreateObject();cJSON_AddBoolToObject(j,"ok",false);cJSON_AddStringToObject(j,"error",message);return response(r,j);}
 static esp_err_t success(request_t*r,const char*message){cJSON*j=cJSON_CreateObject();cJSON_AddBoolToObject(j,"ok",true);cJSON_AddStringToObject(j,"message",message);return response(r,j);}
@@ -260,7 +279,7 @@ static esp_err_t network_action(request_t*r,bool remove){if(!auth(r))return ESP_
 
 static void identity_restart_task(void*a){(void)a;vTaskDelay(pdMS_TO_TICKS(1500));esp_restart();}
 typedef struct {uint32_t version;bool enabled;int32_t passcode;uint16_t port;char host[64];} station_tx_config_t;
-static station_tx_config_t tx_config={.version=1,.passcode=-1,.port=14580,.host="srvr.aprs-is.net"};
+static station_tx_config_t tx_config={.version=1,.passcode=-1,.port=14580,.host="china.aprs2.net"};
 static bool tx_host_valid(const char*s){if(!s||!*s||strlen(s)>63)return false;for(const char*p=s;*p;p++)if(!isalnum((unsigned char)*p)&&*p!='.'&&*p!='-')return false;return true;}
 static bool tx_busy(void){if(identity_restart_pending||voice_busy())return true;
 #ifdef FMO_FULL_SSTV
@@ -470,24 +489,34 @@ static esp_err_t gallery_initialize(request_t*r){
  if(voice_busy()||sstv_rx_active())return fail(r,"请退出 SSTV 接收并结束通联后重试");
  const char*e=sstv_store_initialize_confirmed();return e?fail(r,e):success(r,"相册已初始化，可以重新进入 SSTV 接收");
 }
+typedef struct {httpd_req_t *http;int64_t deadline;} gallery_import_ctx_t;
+static bool import_read(void *ctx,uint8_t *p,size_t n){gallery_import_ctx_t *c=ctx;while(n&&esp_timer_get_time()<c->deadline){int k=httpd_req_recv(c->http,(char*)p,n);if(k==HTTPD_SOCK_ERR_TIMEOUT)continue;if(k<=0)return false;p+=k;n-=k;}return n==0;}
+static esp_err_t gallery_import(httpd_req_t *h){request_t r={.http=h};xSemaphoreTake(api_lock,portMAX_DELAY);bool allowed=auth(&r);xSemaphoreGive(api_lock);if(!allowed)return ESP_OK;
+ if(h->content_len!=153600)return fail(&r,"需要 320×240 RGB565 图片");
+ if(voice_busy()||sstv_rx_active())return fail(&r,"通联或收图中，请稍后导入");
+ gallery_import_ctx_t ctx={h,esp_timer_get_time()+120000000};uint32_t id;unsigned revision=sstv_store_revision();
+ if(!sstv_store_import(import_read,&ctx,time(NULL),&id))return fail(&r,"导入失败：检查空间、连接或存储卡");
+ cJSON*j=cJSON_CreateObject();cJSON_AddBoolToObject(j,"ok",true);cJSON_AddNumberToObject(j,"id",id);cJSON_AddNumberToObject(j,"revision",revision==sstv_store_revision()?revision:0);cJSON_AddStringToObject(j,"medium",sstv_store_on_sd()?"TF card":"Flash");cJSON_AddStringToObject(j,"message","图片已存入设备相册");return response(&r,j);
+}
 static esp_err_t gallery_page(request_t*r,const char*op){
  if(!auth(r))return ESP_OK;
  const char*error=sstv_store_error();if(error){
-  if(!strcmp(op,"gallery")){cJSON*j=cJSON_CreateObject();cJSON_AddArrayToObject(j,"images");cJSON_AddStringToObject(j,"storageError",error);cJSON_AddBoolToObject(j,"needsInitialization",sstv_store_needs_initialization());return response(r,j);}
+  if(!strcmp(op,"gallery")||!strcmp(op,"gallery_page")){cJSON*j=cJSON_CreateObject();cJSON_AddArrayToObject(j,"images");cJSON_AddStringToObject(j,"storageError",error);cJSON_AddBoolToObject(j,"needsInitialization",sstv_store_needs_initialization());return response(r,j);}
   return fail(r,error);
  }
- if(!strcmp(op,"gallery")){
-  sstv_entry_t entries[SSTV_GALLERY_MAX];int n=sstv_store_list(entries);if(n<0)return fail(r,"相册忙，请稍后重试");
-  cJSON*j=cJSON_CreateObject(),*a=cJSON_AddArrayToObject(j,"images");cJSON_AddNumberToObject(j,"capacity",SSTV_GALLERY_MAX);
+ if(!strcmp(op,"gallery")||!strcmp(op,"gallery_page")){
+  uint32_t before=0;if(!strcmp(op,"gallery_page")){cJSON *b=body(r),*v=cJSON_GetObjectItemCaseSensitive(b,"before");if(cJSON_IsNumber(v)&&v->valuedouble>=1&&v->valuedouble<=4294967295.0)before=(uint32_t)v->valuedouble;cJSON_Delete(b);}
+  sstv_entry_t entries[SSTV_GALLERY_MAX];int n=sstv_store_page(entries,before);if(n<0)return fail(r,"相册忙，请稍后重试");
+  cJSON*j=cJSON_CreateObject(),*a=cJSON_AddArrayToObject(j,"images");cJSON_AddNumberToObject(j,"revision",sstv_store_revision());cJSON_AddNumberToObject(j,"capacity",sstv_store_on_sd()?0:SSTV_GALLERY_MAX);cJSON_AddStringToObject(j,"medium",sstv_store_on_sd()?"TF card":"Flash");cJSON_AddNumberToObject(j,"nextBefore",n==SSTV_GALLERY_MAX?entries[n-1].id:0);
 #ifdef FMO_FULL_SSTV
-  sstv_storage_t space;if(sstv_store_stats(&space)){cJSON*st=cJSON_AddObjectToObject(j,"storage");cJSON_AddNumberToObject(st,"total",space.total);cJSON_AddNumberToObject(st,"used",space.used);cJSON_AddNumberToObject(st,"safeLimit",space.safe_limit);cJSON_AddNumberToObject(st,"remaining",space.remaining);cJSON_AddBoolToObject(st,"low",space.low);}
+  sstv_storage_t space;if(sstv_store_stats(&space)){cJSON*st=cJSON_AddObjectToObject(j,"storage");cJSON_AddNumberToObject(st,"count",space.count);cJSON_AddNumberToObject(st,"total",space.total);cJSON_AddNumberToObject(st,"used",space.used);cJSON_AddNumberToObject(st,"safeLimit",space.safe_limit);cJSON_AddNumberToObject(st,"remaining",space.remaining);cJSON_AddBoolToObject(st,"low",space.low);}
 #endif
 
   for(int i=0;i<n;i++){cJSON*v=cJSON_CreateObject();cJSON_AddNumberToObject(v,"id",entries[i].id);cJSON_AddNumberToObject(v,"savedAt",entries[i].saved_at);cJSON_AddNumberToObject(v,"width",entries[i].width);cJSON_AddNumberToObject(v,"height",entries[i].height);cJSON_AddNumberToObject(v,"fileBytes",entries[i].file_bytes);cJSON_AddBoolToObject(v,"compressed",entries[i].compressed);cJSON_AddBoolToObject(v,"partial",entries[i].partial);cJSON_AddNumberToObject(v,"receivedLines",entries[i].received_lines);cJSON_AddStringToObject(v,"relay",entries[i].relay);cJSON_AddItemToArray(a,v);}return response(r,j);
  }
  cJSON*j=body(r),*item=cJSON_GetObjectItemCaseSensitive(j,"id");uint32_t id=0;
  if(cJSON_IsNumber(item)&&item->valuedouble>=1&&item->valuedouble<=4294967295.0&&item->valuedouble==(uint32_t)item->valuedouble)id=item->valuedouble;
- cJSON_Delete(j);if(!id)return fail(r,"图片编号无效");
+ cJSON *rev=cJSON_GetObjectItemCaseSensitive(j,"revision");bool stale=rev&&(!cJSON_IsNumber(rev)||rev->valuedouble!=sstv_store_revision());cJSON_Delete(j);if(stale)return fail(r,"存储空间已改变，请刷新相册");if(!id)return fail(r,"图片编号无效");
  if(!strcmp(op,"gallery_delete")){if(voice_busy())return fail(r,"通联中，请稍后删除");return sstv_store_delete(id)?success(r,"图片已删除"):fail(r,"删除失败，请刷新相册");}
  if(r->usb)return fail(r,"图片预览请使用设备局域网管理页面");
 #ifdef FMO_SSTV_STREAMING
@@ -505,7 +534,21 @@ static esp_err_t gallery_page(request_t*r,const char*op){
 #ifdef CONFIG_FMO_BOARD_XINGZHI
 static esp_err_t wall_probe(request_t*r);
 #endif
+#include "gallery_card_job.inc"
+static esp_err_t gallery_storage(request_t*r,const char *op){
+ if(!auth(r))return ESP_OK;
+ if(!strcmp(op,"gallery_storage")){cJSON*j=cJSON_CreateObject();cJSON_AddStringToObject(j,"selected",sstv_store_on_sd()?"sd":"flash");cJSON_AddBoolToObject(j,"sdSupported",sstv_sd_supported());cJSON_AddBoolToObject(j,"sdReady",sstv_sd_ready());cJSON_AddStringToObject(j,"sdError",sstv_sd_error());uint64_t total,used;if(sstv_sd_space(&total,&used)){cJSON_AddNumberToObject(j,"sdTotal",total);cJSON_AddNumberToObject(j,"sdUsed",used);}return response(r,j);}
+ if(voice_busy()||sstv_rx_active())return fail(r,"请先结束通联并退出 SSTV 接收");
+ const char *err=NULL;
+ if(!strcmp(op,"gallery_storage_select")){cJSON*j=body(r);const char*m=js(j,"medium");bool valid=m&&(!strcmp(m,"sd")||!strcmp(m,"flash")),sd=valid&&!strcmp(m,"sd");cJSON_Delete(j);if(!valid)return fail(r,"存储介质无效");bool old=sstv_store_on_sd();err=sstv_store_select(sd);if(!err){esp_err_t e=nvs_set_u8(nv,"sstv_media",sd?2:1);if(e==ESP_OK)e=nvs_commit(nv);if(e!=ESP_OK){nvs_set_u8(nv,"sstv_media",old?2:1);nvs_commit(nv);sstv_store_select(old);err="保存选择失败，请重试";}}}
+ else {bool format=!strcmp(op,"gallery_card_format");if(format){cJSON*j=body(r);const char*c=js(j,"confirm");bool yes=c&&!strcmp(c,"ERASE_TF_CARD");cJSON_Delete(j);if(!yes)return fail(r,"格式化会清除整张 TF 卡，请明确确认");}err=card_job_start(format);if(!err)return card_job_status(r);}
+ return err?fail(r,err):success(r,"存储操作完成，请刷新相册");
+}
 static esp_err_t dispatch(request_t*r,const char*op){
+#ifdef FMO_FULL_SSTV
+ if(atomic_load(&card_job_active)){if(!auth(r))return ESP_OK;return fail(r,"TF 卡操作进行中，请等待完成");}
+#endif
+ if(!strcmp(op,"gallery_storage")||!strcmp(op,"gallery_storage_select")||!strcmp(op,"gallery_card_retry")||!strcmp(op,"gallery_card_format"))return gallery_storage(r,op);
 #ifndef CONFIG_FMO_BOARD_XINGZHI
  if(!strcmp(op,"mic_diagnostics")&&r->usb){if(!auth(r))return ESP_OK;voice_view_t v;voice_view(&v);cJSON*j=cJSON_CreateObject();cJSON_AddBoolToObject(j,"testing",v.mic_test);cJSON_AddBoolToObject(j,"tx",v.tx);cJSON_AddNumberToObject(j,"sampleRate",v.mic_rate);cJSON_AddNumberToObject(j,"adcOverflows",v.tx_adc_overflows);cJSON_AddNumberToObject(j,"clipped",v.mic_clipped);
 #define MIC_METRIC(k) cJSON_AddNumberToObject(j,#k,v.mic_metrics.k)
@@ -553,6 +596,14 @@ static esp_err_t dispatch(request_t*r,const char*op){
 
 #endif
  if(!strcmp(op,"sstv_prepare")&&r->usb){sstv_rx_init();op="sstv_status";}
+ if(!strcmp(op,"sstv_tx_status")){if(!auth(r))return ESP_OK;bool active;unsigned progress;voice_sstv_status(&active,&progress);voice_view_t v;voice_view(&v);cJSON *j=cJSON_CreateObject();cJSON_AddBoolToObject(j,"active",active);cJSON_AddNumberToObject(j,"progress",progress);cJSON_AddStringToObject(j,"message",v.notice);voice_sstv_diag_t d;voice_sstv_diagnostics(&d);cJSON_AddBoolToObject(j,"probe",d.probe);cJSON_AddStringToObject(j,"reason",d.reason);
+#define TX_DIAG(k) cJSON_AddNumberToObject(j,#k,d.k)
+ TX_DIAG(generated);TX_DIAG(submitted);TX_DIAG(retries);TX_DIAG(dropped);TX_DIAG(maxEncodeUs);TX_DIAG(maxRowReadUs);TX_DIAG(maxLateUs);TX_DIAG(durationMs);
+#undef TX_DIAG
+ return response(r,j);}
+ if(!strcmp(op,"sstv_tx_stop")){if(!auth(r))return ESP_OK;voice_sstv_stop();return success(r,"正在停止 SSTV");}
+ if(!strcmp(op,"sstv_tx_probe")&&r->usb){if(!auth(r))return ESP_OK;cJSON*j=body(r);cJSON*v=cJSON_GetObjectItemCaseSensitive(j,"id");uint32_t id=cJSON_IsNumber(v)&&v->valuedouble>=1&&v->valuedouble<=4294967295.0&&v->valuedouble==(uint32_t)v->valuedouble?(uint32_t)v->valuedouble:0;cJSON_Delete(j);return voice_sstv_probe(id)?success(r,"开始本地编码测试，不发射"):fail(r,"设备忙，无法开始本地测试");}
+ if(!strcmp(op,"sstv_tx_start")){if(!auth(r))return ESP_OK;cJSON *j=body(r),*v=cJSON_GetObjectItemCaseSensitive(j,"id");uint32_t id=cJSON_IsNumber(v)&&v->valuedouble>=1&&v->valuedouble<=4294967295.0&&v->valuedouble==(uint32_t)v->valuedouble?(uint32_t)v->valuedouble:0;cJSON *rev=cJSON_GetObjectItemCaseSensitive(j,"revision");bool stale=rev&&(!cJSON_IsNumber(rev)||rev->valuedouble!=sstv_store_revision());cJSON_Delete(j);if(stale)return fail(r,"存储空间已改变，请刷新相册");return voice_sstv_start(id)?success(r,"开始通过当前 FMO 中继发送"):fail(r,"请先停止收图，确认中继已连接且频道空闲");}
  if(!strcmp(op,"sstv_status")){
   if(!auth(r)){return ESP_OK;}
   sstv_diagnostics_t d;if(!sstv_rx_diagnostics(&d))return fail(r,"SSTV busy");cJSON*j=cJSON_CreateObject();
@@ -572,7 +623,7 @@ static esp_err_t dispatch(request_t*r,const char*op){
  }
 #endif
  if(!strcmp(op,"gallery_initialize"))return gallery_initialize(r);
- if(!strcmp(op,"gallery")||!strcmp(op,"gallery_image")||!strcmp(op,"gallery_delete"))return gallery_page(r,op);
+ if(!strcmp(op,"gallery")||!strcmp(op,"gallery_page")||!strcmp(op,"gallery_image")||!strcmp(op,"gallery_delete"))return gallery_page(r,op);
  if(!strcmp(op,"discovery")){if(!auth(r))return ESP_OK;return response(r,discovery_json());}
  if(!strcmp(op,"discovery_refresh")){if(!auth(r))return ESP_OK;discovery_refresh();nvs_erase_key(nv,"relay_notice");nvs_commit(nv);return success(r,"已安排刷新，空闲时按当前身份重新验证接入");}
  if(!strcmp(op,"discovery_add")){if(!auth(r))return ESP_OK;cJSON*j=body(r),*i=cJSON_GetObjectItemCaseSensitive(j,"index"),*v=cJSON_GetObjectItemCaseSensitive(j,"revision");const char*error="请求无效";if(cJSON_IsNumber(i)&&i->valuedouble==i->valueint&&cJSON_IsNumber(v)&&v->valuedouble>=0&&v->valuedouble<=4294967295.0&&v->valuedouble==(uint32_t)v->valuedouble)error=discovery_add(i->valueint,(uint32_t)v->valuedouble);cJSON_Delete(j);return error?fail(r,error):success(r,"已添加到列表，尚未切换；接入权限仍需验证");}
@@ -600,7 +651,12 @@ static esp_err_t dispatch(request_t*r,const char*op){
  if(!strcmp(op,"login"))return login_page(r);
  return fail(r,"未知操作");
 }
-static esp_err_t http_api(httpd_req_t*h){request_t r={.http=h};xSemaphoreTake(api_lock,portMAX_DELAY);esp_err_t e=dispatch(&r,(const char*)h->user_ctx);xSemaphoreGive(api_lock);return e;}
+static esp_err_t http_api(httpd_req_t*h){request_t r={.http=h};
+#ifdef FMO_FULL_SSTV
+ if(!strcmp((const char*)h->user_ctx,"gallery_card_status"))return card_job_status(&r);
+ if(atomic_load(&card_job_active)){if(!auth(&r))return ESP_OK;return fail(&r,"TF 卡操作进行中，请等待完成");}
+#endif
+xSemaphoreTake(api_lock,portMAX_DELAY);esp_err_t e=dispatch(&r,(const char*)h->user_ctx);xSemaphoreGive(api_lock);return e;}
 static esp_err_t http_transport(httpd_req_t*h){httpd_resp_set_type(h,"application/json");return httpd_resp_sendstr(h,"{\"usb\":false}");}
 static void wipe_json(cJSON*j){if(!j)return;for(cJSON*c=j->child;c;c=c->next)wipe_json(c);if(cJSON_IsString(j)&&j->valuestring)crypto_wipe(j->valuestring,strlen(j->valuestring));}
 static bool shallow_json(const char*s){bool quoted=false,escaped=false;int depth=0;for(;*s;s++){char c=*s;if(quoted){if(escaped)escaped=false;else if(c=='\\')escaped=true;else if(c=='"')quoted=false;}else if(c=='"')quoted=true;else if(c=='{'||c=='['){if(++depth>12)return false;}else if(c=='}'||c==']')depth--;}return true;}
@@ -634,13 +690,21 @@ static void usb_task(void*a){(void)a;size_t capacity=256;char*line=calloc(1,capa
  while(1){int count=board_usb_read(chunk,sizeof(chunk));for(int x=0;x<count;x++){char c=chunk[x];if(c=='\n'){
   line[n]=0;if(!overflow&&n>4&&!memcmp(line,"@M5:",4)&&shallow_json(line+4)){
    cJSON*j=cJSON_Parse(line+4);const char*op=js(j,"op"),*id=js(j,"id");
-   if(op&&id&&strlen(id)<=32){request_t r={.usb=true,.input=cJSON_GetObjectItemCaseSensitive(j,"data")};xSemaphoreTake(api_lock,portMAX_DELAY);dispatch(&r,op);if(r.output){cJSON_AddStringToObject(r.output,"id",id);
+   if(op&&id&&strlen(id)<=32){request_t r={.usb=true,.input=cJSON_GetObjectItemCaseSensitive(j,"data")};
+#ifdef FMO_FULL_SSTV
+ bool card_status=!strcmp(op,"gallery_card_status"),card_busy=atomic_load(&card_job_active);bool api_held=!card_status&&!card_busy;
+ if(api_held)xSemaphoreTake(api_lock,portMAX_DELAY);
+ if(card_status)card_job_status(&r);else if(card_busy)fail(&r,"TF 卡操作进行中，请等待完成");else dispatch(&r,op);
+#else
+ bool api_held=true;xSemaphoreTake(api_lock,portMAX_DELAY);dispatch(&r,op);
+#endif
+ if(r.output){cJSON_AddStringToObject(r.output,"id",id);
 #ifdef FMO_SSTV_STREAMING
 board_usb_write("\n@M5:",5);if(usb_json_write(r.output,usb_json_output,NULL))board_usb_write("\n",1);
 #else
 char*out=cJSON_PrintBuffered(r.output,256,false);if(out){board_usb_write("\n@M5:",5);board_usb_write(out,strlen(out));board_usb_write("\n",1);free(out);}
 #endif
-cJSON_Delete(r.output);}xSemaphoreGive(api_lock);}
+cJSON_Delete(r.output);}if(api_held)xSemaphoreGive(api_lock);}
    wipe_json(j);cJSON_Delete(j);
   }crypto_wipe(line,n);n=0;overflow=false;if(capacity>256){char*small=realloc(line,256);if(small){line=small;capacity=256;}}
  }else if(!overflow&&!usb_append(&line,&capacity,&n,c))overflow=true;}crypto_wipe(chunk,sizeof(chunk));}
@@ -654,7 +718,7 @@ static esp_err_t network_start(void){
  ESP_RETURN_ON_ERROR(esp_wifi_set_protocol(WIFI_IF_STA,WIFI_PROTOCOL_11B|WIFI_PROTOCOL_11G|WIFI_PROTOCOL_11N),TAG,"Wi-Fi bgn protocol");
  ESP_RETURN_ON_ERROR(esp_event_handler_register(WIFI_EVENT,ESP_EVENT_ANY_ID,wifi_event,NULL),TAG,"event");ESP_RETURN_ON_ERROR(esp_event_handler_register(IP_EVENT,IP_EVENT_STA_GOT_IP,wifi_event,NULL),TAG,"event");ESP_RETURN_ON_ERROR(esp_wifi_start(),TAG,"start");ESP_RETURN_ON_ERROR(esp_wifi_set_ps(WIFI_PS_NONE),TAG,"power save");
  
- httpd_config_t h=HTTPD_DEFAULT_CONFIG();h.stack_size=14336;h.max_req_hdr_len=1536;h.max_uri_handlers=42;h.max_open_sockets=4;h.lru_purge_enable=true;h.recv_wait_timeout=3;h.send_wait_timeout=5;httpd_handle_t server;ESP_RETURN_ON_ERROR(httpd_start(&server,&h),TAG,"http");
+ httpd_config_t h=HTTPD_DEFAULT_CONFIG();h.stack_size=14336;h.max_req_hdr_len=1536;h.max_uri_handlers=52;h.max_open_sockets=4;h.lru_purge_enable=true;h.recv_wait_timeout=3;h.send_wait_timeout=5;httpd_handle_t server;ESP_RETURN_ON_ERROR(httpd_start(&server,&h),TAG,"http");
  const httpd_uri_t routes[]={
 #ifdef CONFIG_FMO_BOARD_XINGZHI
  {.uri="/api/gallery/upload",.method=HTTP_POST,.handler=gallery_wall_http},
@@ -662,6 +726,16 @@ static esp_err_t network_start(void){
  {.uri="/api/gallery/wall/status",.method=HTTP_GET,.handler=http_api,.user_ctx="sstv_wall_probe"},
  {.uri="/api/sstv/status",.method=HTTP_GET,.handler=http_api,.user_ctx="sstv_status"},
 #endif
+ {.uri="/api/gallery/card/status",.method=HTTP_GET,.handler=http_api,.user_ctx="gallery_card_status"},
+ {.uri="/api/gallery/storage",.method=HTTP_GET,.handler=http_api,.user_ctx="gallery_storage"},
+ {.uri="/api/gallery/storage",.method=HTTP_POST,.handler=http_api,.user_ctx="gallery_storage_select"},
+ {.uri="/api/gallery/card/retry",.method=HTTP_POST,.handler=http_api,.user_ctx="gallery_card_retry"},
+ {.uri="/api/gallery/card/format",.method=HTTP_POST,.handler=http_api,.user_ctx="gallery_card_format"},
+ {.uri="/api/gallery/import",.method=HTTP_POST,.handler=gallery_import},
+ {.uri="/api/gallery/page",.method=HTTP_POST,.handler=http_api,.user_ctx="gallery_page"},
+ {.uri="/api/sstv/tx",.method=HTTP_POST,.handler=http_api,.user_ctx="sstv_tx_start"},
+ {.uri="/api/sstv/tx/stop",.method=HTTP_POST,.handler=http_api,.user_ctx="sstv_tx_stop"},
+ {.uri="/api/sstv/tx",.method=HTTP_GET,.handler=http_api,.user_ctx="sstv_tx_status"},
  {.uri="/api/gallery/initialize",.method=HTTP_POST,.handler=http_api,.user_ctx="gallery_initialize"}, {.uri="/api/gallery",.method=HTTP_GET,.handler=http_api,.user_ctx="gallery"}, {.uri="/api/gallery/image",.method=HTTP_POST,.handler=http_api,.user_ctx="gallery_image"}, {.uri="/api/gallery/delete",.method=HTTP_POST,.handler=http_api,.user_ctx="gallery_delete"}, {.uri="/api/roots",.method=HTTP_POST,.handler=http_api,.user_ctx="roots"}, {.uri="/api/relays/page",.method=HTTP_POST,.handler=http_api,.user_ctx="relays_paged"}, {.uri="/api/discovery/add",.method=HTTP_POST,.handler=http_api,.user_ctx="discovery_add"}, {.uri="/api/discovery",.method=HTTP_GET,.handler=http_api,.user_ctx="discovery"},{.uri="/api/discovery/refresh",.method=HTTP_POST,.handler=http_api,.user_ctx="discovery_refresh"},{.uri="/api/discovery/select",.method=HTTP_POST,.handler=http_api,.user_ctx="discovery_select"}, {.uri="/api/logout",.method=HTTP_POST,.handler=http_api,.user_ctx="logout"}, {.uri="/api/relay/name",.method=HTTP_POST,.handler=http_api,.user_ctx="relay_name"}, {.uri="/api/relay/delete",.method=HTTP_POST,.handler=http_api,.user_ctx="relay_delete"}, {.uri="/api/station/broadcast",.method=HTTP_POST,.handler=http_api,.user_ctx="station_broadcast"}, {.uri="/api/station",.method=HTTP_GET,.handler=http_api,.user_ctx="station_get"}, {.uri="/api/station",.method=HTTP_POST,.handler=http_api,.user_ctx="station_save"}, {.uri="/api/identity/reset",.method=HTTP_POST,.handler=http_api,.user_ctx="identity_reset"}, {.uri="/api/certificate/rollback",.method=HTTP_POST,.handler=http_api,.user_ctx="rollback"}, {.uri="/api/scan",.method=HTTP_POST,.handler=http_api,.user_ctx="scan"}, {.uri="/api/networks",.method=HTTP_GET,.handler=http_api,.user_ctx="networks"}, {.uri="/api/network/connect",.method=HTTP_POST,.handler=http_api,.user_ctx="network_connect"}, {.uri="/api/network/delete",.method=HTTP_POST,.handler=http_api,.user_ctx="network_delete"}, {.uri="/api/relays",.method=HTTP_GET,.handler=http_api,.user_ctx="relays"}, {.uri="/api/relays",.method=HTTP_POST,.handler=http_api,.user_ctx="relay_add"}, {.uri="/api/relay/select",.method=HTTP_POST,.handler=http_api,.user_ctx="relay_select"}, {.uri="/api/reconnect",.method=HTTP_POST,.handler=http_api,.user_ctx="reconnect"}, {.uri="/",.method=HTTP_GET,.handler=index_page}, {.uri="/api/transport",.method=HTTP_GET,.handler=http_transport}, {.uri="/api/login",.method=HTTP_POST,.handler=http_api,.user_ctx="login"}, {.uri="/api/status",.method=HTTP_GET,.handler=http_api,.user_ctx="status"}, {.uri="/api/wifi",.method=HTTP_POST,.handler=http_api,.user_ctx="wifi"}, {.uri="/api/request",.method=HTTP_POST,.handler=http_api,.user_ctx="request"}, {.uri="/api/certificate",.method=HTTP_POST,.handler=http_api,.user_ctx="certificate"}, {.uri="/api/certificate",.method=HTTP_DELETE,.handler=http_api,.user_ctx="delete"}};
  for(unsigned i=0;i<sizeof(routes)/sizeof(routes[0]);i++)ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server,&routes[i]),TAG,"route");
  ESP_LOGI(TAG,"STA network and HTTP initialized");return ESP_OK;
@@ -721,6 +795,7 @@ static esp_err_t apply_profile_switch(void){
 esp_err_t device_web_start(void){
  lock=xSemaphoreCreateMutex();mqtt_lock=xSemaphoreCreateMutex();api_lock=xSemaphoreCreateMutex();events=xEventGroupCreate();jobs=xQueueCreate(1,sizeof(wifi_config_t));if(!lock||!mqtt_lock||!api_lock||!events||!jobs)return ESP_ERR_NO_MEM;
  ESP_RETURN_ON_ERROR(nvs_flash_init(),TAG,"NVS init failed");ESP_RETURN_ON_ERROR(nvs_open("m5fmo_v1",NVS_READWRITE,&nv),TAG,"NVS open failed");
+ uint8_t media=0;if(nvs_get_u8(nv,"sstv_media",&media)==ESP_OK&&(media==1||media==2))sstv_store_select(media==2);
  if(roots_seed_defaults()!=ESP_OK)ESP_LOGW(TAG,"Public root preset storage full; existing identities preserved");
  ESP_RETURN_ON_ERROR(identity_apply_pending(nv),TAG,"identity transition incomplete");
  esp_err_t migration_result=enroll_migrate();

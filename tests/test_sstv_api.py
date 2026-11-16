@@ -4,6 +4,8 @@ import os,subprocess,tempfile
 root=Path(__file__).resolve().parents[1]
 s=(root/'ui-preview-firmware/main/device_web.c').read_text()
 handler=s[s.index('#ifdef FMO_SSTV_STREAMING\nstatic bool gallery_chunk('):s.index('static esp_err_t dispatch(')].replace('static esp_err_t wall_probe(request_t*r);','')
+handler=handler[:handler.index('typedef struct {httpd_req_t *http;int64_t deadline;} gallery_import_ctx_t;')]+handler[handler.index('static esp_err_t gallery_page('):]
+handler=handler[:handler.index('#include "gallery_card_job.inc"')]
 pre=r'''
 #include "sstv_store.h"
 #include "cJSON.h"

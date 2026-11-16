@@ -1,4 +1,5 @@
 #include "resource_metrics.h"
+#include "sstv_sd.h"
 #include "ui_diagnostics.h"
 #include "esp_heap_caps.h"
 #include "call_indicator.h"
@@ -15,11 +16,13 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "lvgl.h"
+#include "src/draw/sw/lv_draw_sw_blend.h"
 #include "lv_port_disp.h"
 #include "fmo_display.h"
 #include "display_idle.h"
 #include "device_web.h"
 #include <assert.h>
+#include <stdatomic.h>
 #include <stdarg.h>
 #include <string.h>
 #include <stdio.h>
@@ -77,7 +80,7 @@ static void load_settings(void){
 static display_idle_t display_idle;
 unsigned ui_backlight_percent=100,ui_idle_seconds,ui_pressed_mask;
 unsigned ui_key_events;int ui_last_key=-1,ui_last_action=-1;
-enum {HOME,MENU,RELAYS,VOLUME,IDENTITY,WEB,MIC,DISCOVER,CA_LIST,CA_CONFIRM,SETTINGS,KEY_LAYOUT,MEDIA,SSTV,GALLERY,RESOURCES};
+enum {HOME,MENU,RELAYS,VOLUME,IDENTITY,WEB,MIC,DISCOVER,CA_LIST,CA_CONFIRM,SETTINGS,KEY_LAYOUT,MEDIA,SSTV,GALLERY,RESOURCES,SSTV_TX_CONFIRM,SSTV_TX_PAGE};
 static int page=HOME,selection=0;
 static lv_obj_t *sstv_image;
 static lv_img_dsc_t sstv_image_desc;
@@ -88,28 +91,77 @@ static char image_notice[112];
 static bool sstv_start_failed;
 static sstv_entry_t gallery_entries[SSTV_GALLERY_MAX];
 static int gallery_count;
+static unsigned gallery_revision;
+static uint32_t tx_image_id;static bool tx_launch_failed;
 #ifdef FMO_FULL_SSTV
 static sstv_storage_t gallery_space;static bool gallery_space_valid;
 #endif
 #ifdef FMO_SSTV_STREAMING
+#define GALLERY_PREVIEW_WIDTH 80
+#define GALLERY_PREVIEW_HEIGHT 60
+/* Reserve at link time: network/HTTP allocations can fragment the heap below 4800 bytes. */
+static uint8_t gallery_pixels[GALLERY_PREVIEW_WIDTH*GALLERY_PREVIEW_HEIGHT];
+static uint8_t gallery_sides[2][40*30];
+static uint32_t gallery_center_id,gallery_side_id[2];
+static bool gallery_side_ready[2];
+static atomic_int gallery_work;
+static int gallery_direction;
+static bool gallery_preview_ready;
+static void gallery_request(int direction){if(atomic_load(&gallery_work))return;gallery_direction=direction;gallery_preview_ready=false;atomic_store(&gallery_work,1);}
+/* Runs on the existing management worker, never touches LVGL or button state. */
+void ui_gallery_worker_tick(void){
+ int expected=1;if(!atomic_compare_exchange_strong(&gallery_work,&expected,2))return;
+ image_notice[0]=0;gallery_space_valid=false;
+ if(voice_busy()){snprintf(image_notice,sizeof(image_notice),"通联中，请稍后打开相册");goto done;}
+ if(gallery_direction==0){gallery_center_id=0;gallery_side_id[0]=gallery_side_id[1]=0;gallery_count=sstv_store_list(gallery_entries);selection=0;}
+ else if(gallery_count>0){if(gallery_direction<0){if(selection)selection--;else{int n=sstv_store_newer(gallery_entries,gallery_entries[0].id);if(!n)n=sstv_store_newer(gallery_entries,0);gallery_count=n;selection=n>0?n-1:0;}}
+ else{if(selection+1<gallery_count)selection++;else{int n=sstv_store_page(gallery_entries,gallery_entries[gallery_count-1].id);if(!n)n=sstv_store_list(gallery_entries);gallery_count=n;selection=0;}}}
+ if(gallery_count<=0)snprintf(image_notice,sizeof(image_notice),"%s",gallery_count<0?"相册读取失败，请重新进入":"相册为空");
+ else{
+  uint32_t id=gallery_entries[selection].id;
+  uint32_t neighbors[2]={selection>0?gallery_entries[selection-1].id:sstv_store_neighbor(id,true),selection+1<gallery_count?gallery_entries[selection+1].id:sstv_store_neighbor(id,false)};
+  for(unsigned side=0;side<2;side++){
+   uint32_t next=neighbors[side];gallery_side_ready[side]=false;
+   if(!next||next==id){gallery_side_id[side]=0;continue;}
+   if(next==gallery_center_id){for(unsigned y=0;y<30;y++)for(unsigned x=0;x<40;x++)gallery_sides[side][y*40+x]=gallery_pixels[y*2*80+x*2];gallery_side_ready[side]=true;}
+   else if(side&&next==gallery_side_id[0]&&gallery_side_ready[0]){memcpy(gallery_sides[1],gallery_sides[0],sizeof(gallery_sides[0]));gallery_side_ready[side]=true;}
+   else if(next==gallery_side_id[side])gallery_side_ready[side]=true;
+   else gallery_side_ready[side]=sstv_store_thumbnail(next,gallery_sides[side],40,30);
+   gallery_side_id[side]=gallery_side_ready[side]?next:0;
+  }
+  gallery_preview_ready=id==gallery_center_id||sstv_store_thumbnail(id,gallery_pixels,GALLERY_PREVIEW_WIDTH,GALLERY_PREVIEW_HEIGHT);
+  gallery_center_id=gallery_preview_ready?id:0;
+  if(!gallery_preview_ready)snprintf(image_notice,sizeof(image_notice),"图片已删除、损坏或相册忙");
+ }
+ done:atomic_store(&gallery_work,3);
+}
 static void image_draw(lv_event_t *event){
  lv_draw_ctx_t *ctx=lv_event_get_draw_ctx(event);lv_obj_t *obj=lv_event_get_target(event);
- const uint8_t *pixels=sstv_rx_pixels();if(!pixels)return;
- lv_area_t box;lv_obj_get_coords(obj,&box);lv_color_t row[240];
- lv_img_dsc_t img={.header={.cf=LV_IMG_CF_TRUE_COLOR,.w=240,.h=1},.data_size=sizeof(row),.data=(const uint8_t*)row};
- lv_draw_img_dsc_t style;lv_draw_img_dsc_init(&style);
+ const uint8_t *pixels=page==GALLERY?gallery_pixels:sstv_rx_pixels();if(!pixels)return;
+ lv_area_t box;lv_obj_get_coords(obj,&box);lv_color_t row[320];
+ unsigned width=page==GALLERY?320:240,height=180;
+ if(page!=GALLERY)box.x1+=40;
  int first=ctx->clip_area->y1>box.y1?ctx->clip_area->y1-box.y1:0;
- int last=ctx->clip_area->y2<box.y2?ctx->clip_area->y2-box.y1:179;
+ int last=ctx->clip_area->y2<box.y1+(int)height-1?ctx->clip_area->y2-box.y1:(int)height-1;
  for(int y=first;y<=last;y++){
-  for(unsigned x=0;x<240;x++){uint8_t v=pixels[(y*SSTV_PREVIEW_HEIGHT/180)*SSTV_PREVIEW_WIDTH+x*SSTV_PREVIEW_WIDTH/240];row[x]=lv_color_make((v>>5)*255/7,((v>>2)&7)*255/7,(v&3)*255/3);}
-  lv_area_t line={box.x1,box.y1+y,box.x1+239,box.y1+y};lv_draw_img(ctx,&style,&line,&img);
+  for(unsigned x=0;x<width;x++){
+   if(page!=GALLERY){uint8_t v=pixels[(y*SSTV_PREVIEW_HEIGHT/180)*SSTV_PREVIEW_WIDTH+x*SSTV_PREVIEW_WIDTH/240];row[x]=lv_color_make((v>>5)*255/7,((v>>2)&7)*255/7,(v&3)*255/3);continue;}
+   row[x]=lv_color_make(13,21,29);
+   if(x>=98&&x<222&&y>=43&&y<137&&(x<100||x>=220||y<45||y>=135)){row[x]=lv_color_make(88,214,178);continue;}
+   const uint8_t *src=NULL;unsigned at=0;
+   if(x>=100&&x<220&&y>=45&&y<135){src=gallery_pixels;at=((y-45)*60/90)*80+(x-100)*80/120;}
+   else if(x>=12&&x<92&&y>=60&&y<120&&gallery_side_ready[0]){src=gallery_sides[0];at=((y-60)/2)*40+(x-12)/2;}
+   else if(x>=228&&x<308&&y>=60&&y<120&&gallery_side_ready[1]){src=gallery_sides[1];at=((y-60)/2)*40+(x-228)/2;}
+   if(src){uint8_t v=src[at];row[x]=lv_color_make((v>>5)*255/7,((v>>2)&7)*255/7,(v&3)*255/3);}
+  }
+  lv_area_t line={box.x1,box.y1+y,box.x1+(int)width-1,box.y1+y};lv_draw_sw_blend_dsc_t blend={.blend_area=&line,.src_buf=row,.opa=LV_OPA_COVER,.blend_mode=LV_BLEND_MODE_NORMAL};lv_draw_sw_blend(ctx,&blend);
  }
 }
 static void image_changed(void){if(sstv_image)lv_obj_invalidate(sstv_image);}
 static void ensure_image(void){
- if(sstv_image||!sstv_rx_pixels())return;
- sstv_image=lv_obj_create(lv_scr_act());lv_obj_remove_style_all(sstv_image);lv_obj_set_size(sstv_image,240,180);
- lv_obj_set_pos(sstv_image,(FMO_WIDTH-240)/2,30);lv_obj_clear_flag(sstv_image,LV_OBJ_FLAG_SCROLLABLE);
+ if(sstv_image||(page!=GALLERY&&!sstv_rx_pixels()))return;
+ sstv_image=lv_obj_create(lv_scr_act());lv_obj_remove_style_all(sstv_image);lv_obj_set_size(sstv_image,320,180);
+ lv_obj_set_pos(sstv_image,(FMO_WIDTH-320)/2,30);lv_obj_clear_flag(sstv_image,LV_OBJ_FLAG_SCROLLABLE);
  lv_obj_add_event_cb(sstv_image,image_draw,LV_EVENT_DRAW_MAIN,NULL);lv_obj_add_flag(sstv_image,LV_OBJ_FLAG_HIDDEN);
 }
 #else
@@ -161,6 +213,7 @@ sstv_image_desc.data=sstv_rx_pixels();
  lv_obj_add_flag(sstv_image,LV_OBJ_FLAG_HIDDEN);
 }
 #endif
+#ifndef FMO_SSTV_STREAMING
 static void gallery_load(void){
 #ifdef FMO_FULL_SSTV
  gallery_space_valid=sstv_store_stats(&gallery_space);
@@ -179,6 +232,7 @@ static void gallery_load(void){
  else snprintf(image_notice,sizeof(image_notice),"%s",sstv_store_error()?sstv_store_error():!p?"内存不足，无法显示图片":gallery_count<0?"相册读取失败，请重新进入":"相册为空");
  image_changed();
 }
+#endif
 
 static device_profile_t ca_profiles[DEVICE_PROFILE_MAX],ca_target;
 static int ca_count;
@@ -378,10 +432,22 @@ static void go(int next){if(page==SSTV
 #endif
  sstv_saved=0;image_notice[0]=0;sstv_status=SSTV_WAITING;sstv_lines=0;sstv_generation=~0u;if((sstv_start_failed=!sstv_rx_enable(true)))snprintf(image_notice,sizeof(image_notice),"%s",sstv_store_error()?sstv_store_error():sstv_store_save_error());ensure_image();}
  if(next==RESOURCES)gallery_space_valid=sstv_store_stats(&gallery_space);
- if(next==GALLERY){sstv_rx_init();ensure_image();selection=0;gallery_count=sstv_store_list(gallery_entries);gallery_load();}
+ if(next==GALLERY){gallery_revision=sstv_store_revision();
+#ifdef FMO_SSTV_STREAMING
+ gallery_request(0);
+#else
+ sstv_rx_init();ensure_image();selection=0;gallery_count=sstv_store_list(gallery_entries);gallery_load();
+#endif
+ }
+#ifdef FMO_SSTV_STREAMING
+ else if(!atomic_load(&gallery_work)){gallery_preview_ready=false;}
+#endif
  device_management_ap(next==WEB);selection=0;buttons_block(&keys);if(next==RELAYS)selection=relays_current(NULL,NULL);if(next==CA_CONFIRM)ca_submitted=false;if(next==KEY_LAYOUT)selection=ui_key_layout;if(next==MIC)voice_mic_test(true);if(next==IDENTITY||next==CA_LIST)load_ca_profiles();if(next==DISCOVER){discovered_count=discovery_list(discovered_ui,&discovered_revision);discovery_refresh();discovery_notice[0]=0;}}
 static void key(int k,key_action_t action,void*ctx){(void)ctx;ui_key_events++;ui_last_key=k;ui_last_action=action;ESP_LOGI("buttons","key=%d action=%d",k,action);
  if(action==KEY_PTT_STOP||action==KEY_CANCEL){voice_ptt(false);return;}
+ #ifdef FMO_SSTV_STREAMING
+ if(page==GALLERY&&atomic_load(&gallery_work))return;
+#endif
  if(action==KEY_PTT_START){if(page==HOME)voice_ptt(true);return;}
  if(page==KEY_LAYOUT){if(action==KEY_LONG&&k==0){go(HOME);return;}if(action==KEY_SHORT){if(k==0)selection=(selection+KEY_LAYOUT_COUNT-1)%KEY_LAYOUT_COUNT;if(k==2)selection=(selection+1)%KEY_LAYOUT_COUNT;if(k==1){voice_ptt(false);if(save_key_layout(selection)){go(HOME);create_ui();}}}return;}
  if(action==KEY_LONG){if(page==HOME){if(k==0)go(MEDIA);if(k==1)voice_ptt(false);if(k==2)go(MENU);}else if(k==0)go(HOME);return;}
@@ -405,7 +471,13 @@ static void key(int k,key_action_t action,void*ctx){(void)ctx;ui_key_events++;ui
    else snprintf(image_notice,sizeof(image_notice),"%s",sstv_store_error()?sstv_store_error():sstv_store_save_error());
   }return;
  }
- if(page==GALLERY){if(k==1){go(MEDIA);return;}if(gallery_count>0){if(k==0)selection=(selection+gallery_count-1)%gallery_count;if(k==2)selection=(selection+1)%gallery_count;gallery_load();}return;}
+ if(page==SSTV_TX_CONFIRM){if(gallery_revision!=sstv_store_revision()){go(GALLERY);return;}if(k==1){go(SSTV_TX_PAGE);tx_launch_failed=!voice_sstv_start(tx_image_id);}else go(GALLERY);return;}
+ if(page==SSTV_TX_PAGE){if(k==1)voice_sstv_stop();else{voice_sstv_stop();go(GALLERY);}return;}
+#ifdef FMO_SSTV_STREAMING
+ if(page==GALLERY){if(gallery_revision!=sstv_store_revision()){go(GALLERY);return;}if(k==1){if(gallery_count>0&&gallery_preview_ready){tx_image_id=gallery_entries[selection].id;go(SSTV_TX_CONFIRM);}else if(gallery_count<=0)go(MEDIA);return;}gallery_request(k==0?-1:1);return;}
+#else
+ if(page==GALLERY){if(gallery_revision!=sstv_store_revision()){go(GALLERY);return;}if(k==1){if(gallery_count>0){tx_image_id=gallery_entries[selection].id;go(SSTV_TX_CONFIRM);}else go(MEDIA);return;}if(gallery_count>0){if(k==0){if(selection)selection--;else{int n=sstv_store_newer(gallery_entries,gallery_entries[0].id);if(!n)n=sstv_store_newer(gallery_entries,0);gallery_count=n;selection=n>0?n-1:0;}}if(k==2){if(selection+1<gallery_count)selection++;else{int n=sstv_store_page(gallery_entries,gallery_entries[gallery_count-1].id);if(!n)n=sstv_store_list(gallery_entries);gallery_count=n;selection=0;}}gallery_load();}return;}
+#endif
  if(page==RESOURCES){if(k==1)go(MENU);else selection=1-selection;return;}
  if(page==MENU){if(k==0)selection=(selection+sizeof(items)/sizeof(items[0])-1)%(sizeof(items)/sizeof(items[0]));if(k==2)selection=(selection+1)%(sizeof(items)/sizeof(items[0]));if(k==1){int target=selection;if(target==0)go(RELAYS);else if(target==1)go(VOLUME);else if(target==2)go(IDENTITY);else if(target==3)go(WEB);else if(target==4)voice_tone();else if(target==5)go(MIC);else if(target==6)go(SETTINGS);else if(target==7)go(KEY_LAYOUT);
 #ifdef FMO_FULL_SSTV
@@ -427,6 +499,11 @@ else go(HOME);}return;}
  if(k==1)go(HOME);
 }
 static void refresh(void){
+#ifdef FMO_SSTV_STREAMING
+ if(page==GALLERY&&atomic_load(&gallery_work)==3){atomic_store(&gallery_work,0);buttons_block(&keys);ensure_image();image_changed();}
+#endif
+
+ if((page==GALLERY||page==SSTV_TX_CONFIRM)&&gallery_revision!=sstv_store_revision())go(GALLERY);
  ui_mark(2);device_view_t v;device_web_view(&v);ui_mark(3);voice_view_t a;voice_view(&a);
  int64_t now=esp_timer_get_time();bool active=a.tx||a.rx;
  if(!idle_started||active||was_active){idle_since=now;idle_started=true;}
@@ -474,7 +551,15 @@ static void refresh(void){
 #else
   lv_label_set_text(footer,sstv_status==SSTV_RECEIVING?"A 退出":"A 退出  B 保存  C 重新等待");
 #endif
+ }else if(page==SSTV_TX_CONFIRM){
+  lv_label_set_text(title,"发送图片？");lv_label_set_text_fmt(lines[0],"图片 #%lu",(unsigned long)tx_image_id);lv_label_set_text(lines[1],"Robot36 · 约 37 秒");lv_label_set_text(lines[2],"通过当前 FMO 中继发送");lv_label_set_text(footer,"A 返回  B 发射  C 返回");
+ }else if(page==SSTV_TX_PAGE){
+  bool active;unsigned progress;voice_sstv_status(&active,&progress);lv_label_set_text(title,tx_launch_failed?"无法开始发射":active?"SSTV 发射中":"SSTV 发射结束");lv_label_set_text_fmt(lines[0],"图片 #%lu · %u%%",(unsigned long)tx_image_id,progress);lv_label_set_text(lines[1],tx_launch_failed?"请检查中继及频道状态":active?"正在发送 Robot36":progress==100?"请在接收端确认图片":"发送已停止，请检查状态");lv_label_set_text(footer,"A 返回  B 停止  C 返回");
  }else if(page==GALLERY){
+#ifdef FMO_SSTV_STREAMING
+  if(atomic_load(&gallery_work)){if(sstv_image)lv_obj_add_flag(sstv_image,LV_OBJ_FLAG_HIDDEN);lv_label_set_text(title,"SSTV相册");lv_label_set_text(lines[0],"正在读取图片，请稍候…");lv_label_set_text(footer,"加载完成后再按键");return;}
+  if(sstv_image){if(gallery_preview_ready)lv_obj_clear_flag(sstv_image,LV_OBJ_FLAG_HIDDEN);else lv_obj_add_flag(sstv_image,LV_OBJ_FLAG_HIDDEN);}
+#endif
   lv_label_set_text_fmt(title,"Gallery  %d/%d",gallery_count>0?selection+1:0,gallery_count>0?gallery_count:0);
   if(image_notice[0])lv_label_set_text(lines[0],image_notice);else if(gallery_count>0)lv_label_set_text_fmt(lines[0],"Robot36 · 图片 #%lu",(unsigned long)gallery_entries[selection].id);
   lv_obj_set_y(lines[0],64);
@@ -482,9 +567,9 @@ static void refresh(void){
   if(!image_notice[0]){if(gallery_count>0&&gallery_entries[selection].partial)lv_label_set_text_fmt(lines[0],"残图 %u/240行",gallery_entries[selection].received_lines);else lv_label_set_text(lines[0],"SSTV相册");}
   lv_obj_add_flag(title,LV_OBJ_FLAG_HIDDEN);lv_label_set_text_fmt(brand,"%d/%d",gallery_count>0?selection+1:0,gallery_count>0?gallery_count:0);lv_obj_set_pos(brand,FMO_WIDTH-50,7);lv_obj_set_width(brand,42);lv_obj_set_style_text_align(brand,LV_TEXT_ALIGN_RIGHT,0);lv_obj_set_pos(lines[0],8,7);lv_obj_set_width(lines[0],FMO_WIDTH-68);lv_obj_set_y(footer,lv_disp_get_ver_res(NULL)-19);
 #endif
-  lv_label_set_text(footer,"A 上张  B 返回  C 下张");
+  lv_label_set_text(footer,"A 上张  B 选择  C 下张");
 #ifdef FMO_FULL_SSTV
-  if(gallery_space_valid){unsigned phase=(unsigned)(now/4000000)%3;if(phase==1)lv_label_set_text_fmt(footer,"%uKB/20张 余约%u张",(unsigned)(gallery_space.total/1024),gallery_space.remaining);if(phase==2)lv_label_set_text(footer,gallery_space.low?"空间不足 请导出并删除":"请及时导出并删除旧图");}
+  if(gallery_space_valid){unsigned phase=(unsigned)(now/4000000)%3;if(phase==1)lv_label_set_text_fmt(footer,"%uKB 余约%u张",(unsigned)(gallery_space.total/1024),gallery_space.remaining);if(phase==2)lv_label_set_text(footer,gallery_space.low?"空间不足 请导出并删除":"请及时导出并删除旧图");}
 #endif
 
 #ifdef FMO_FULL_SSTV
@@ -563,6 +648,11 @@ void app_main(void){
 #endif
  };ESP_ERROR_CHECK(gpio_config(&cfg));
  side_leds_init();battery_init();
+
+#ifndef CONFIG_FMO_BOARD_XINGZHI
+ gpio_set_level(4,1);gpio_set_direction(4,GPIO_MODE_OUTPUT);
+ gpio_set_level(14,1);gpio_set_direction(14,GPIO_MODE_OUTPUT);
+#endif
  lv_init();verify_fonts();lv_port_disp_set_rotation(0);lv_port_disp_init();
  create_ui();
  const esp_timer_create_args_t ta={.callback=tick,.name="lv_tick"};esp_timer_handle_t timer;ESP_ERROR_CHECK(esp_timer_create(&ta,&timer));ESP_ERROR_CHECK(esp_timer_start_periodic(timer,1000));
@@ -575,6 +665,7 @@ void app_main(void){
  if(result==ESP_OK){load_settings();lv_disp_set_rotation(NULL,(lv_disp_rot_t)rotation);create_ui();}
  int pins[3]={FMO_KEY_A,FMO_KEY_B,FMO_KEY_C};uint8_t initial=0;for(int i=0;i<3;i++)if(!gpio_get_level(pins[i]))initial|=1<<i;buttons_init(&keys,key_layout_mask(ui_key_layout,initial),key,NULL);buttons_set_momentary(&keys,!ptt_latch);int64_t updated=0,led_updated=0;
  while(1){
+ if(sstv_sd_pause_display()){vTaskDelay(pdMS_TO_TICKS(10));continue;}
 #ifdef CONFIG_FMO_BOARD_XINGZHI
  unsigned loop_now=(unsigned)(esp_timer_get_time()/1000),last_loop=atomic_load(&ui_loop_ms);if(last_loop)ui_max(&ui_loop_max_ms,loop_now-last_loop);atomic_store(&ui_loop_ms,loop_now);
 #endif
@@ -591,7 +682,7 @@ void app_main(void){
  ui_mark(6);int64_t render_start=esp_timer_get_time();
 #endif
 #ifdef FMO_SSTV_STREAMING
- if(page!=SSTV&&page!=GALLERY)lv_timer_handler();
+ if(page!=SSTV)lv_timer_handler();
  else if(sstv_rx_display_lock()){lv_timer_handler();sstv_rx_display_unlock();}
 #else
  lv_timer_handler();

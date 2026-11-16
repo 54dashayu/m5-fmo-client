@@ -47,6 +47,7 @@ static inline int64_t esp_timer_get_time(void){return mock_now;}
 '''
 test=r'''
 #include "sstv_rx.c"
+bool voice_busy(void){return false;}
 #include <assert.h>
 #include <stdio.h>
 static unsigned writes;
@@ -122,6 +123,7 @@ puts("PASS SSTV opt-in: disabled boot, bounded nonblocking queue, overflow inval
 with tempfile.TemporaryDirectory() as td:
  d=Path(td);(d/'stubs.h').write_text(stub);(d/'freertos').mkdir()
  for name in ['freertos/FreeRTOS.h','freertos/task.h','freertos/queue.h','freertos/semphr.h','esp_heap_caps.h','esp_timer.h','sdkconfig.h']:(d/name).write_text('#include "stubs.h"\n')
+ (d/'esp_err.h').write_text('typedef int esp_err_t;\n')
  (d/'test.c').write_text(test)
  for flags in ([],['-DCONFIG_FMO_BOARD_XINGZHI'],['-DCONFIG_IDF_TARGET_ESP32']):
   subprocess.run(['cc',*flags,'-std=c11','-Wall','-Wextra','-Werror','-I'+td,'-I'+str(root/'ui-preview-firmware/main'),str(d/'test.c'),str(root/'ui-preview-firmware/main/sstv_decoder.c'),'-lm','-o',td+'/test'],check=True);subprocess.run([td+'/test'],check=True)

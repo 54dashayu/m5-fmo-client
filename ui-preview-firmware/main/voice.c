@@ -1,6 +1,8 @@
 #include "board.h"
 #include "voice.h"
 #include "sstv_rx.h"
+#include "sstv_store.h"
+#include "sstv_encoder.h"
 #include "call_history.h"
 #include "voice_wire.h"
 #include "voice_tx.h"
@@ -47,22 +49,24 @@ static int64_t rx_first_arrival;
 static int64_t last_pcm_feed;
 static uint32_t connection_epoch;
 static uint32_t rx_loss_epoch;
+static uint32_t sstv_job;static bool sstv_cancel;static unsigned sstv_progress;
+static voice_sstv_diag_t sstv_diag;
 static bool requested,test_requested,tone_requested;static uint32_t uid,server_uid;static char own_call[13];static int64_t rx_until;static int mic_clock_request=8000;static int mode=-1;static OpusDecoder*decoder;
 static void reason(const char*s){portENTER_CRITICAL(&mux);snprintf(state.stop_reason,sizeof(state.stop_reason),"%s",s);portEXIT_CRITICAL(&mux);ESP_LOGI("voice","stop=%s",s);}
 static void notice(const char*s){portENTER_CRITICAL(&mux);snprintf(state.notice,sizeof(state.notice),"%s",s);portEXIT_CRITICAL(&mux);}
 void voice_view(voice_view_t*out){portENTER_CRITICAL(&mux);bool rx=esp_timer_get_time()<rx_until;if(!rx)call_history_push(state.last_caller,state.previous_caller,state.caller);*out=state;out->rx=rx;portEXIT_CRITICAL(&mux);}
-bool voice_busy(void){voice_view_t v;voice_view(&v);portENTER_CRITICAL(&mux);bool pending=requested||test_requested;portEXIT_CRITICAL(&mux);return pending||v.tx||v.rx||v.mic_test||v.tx_pending;}
+bool voice_busy(void){voice_view_t v;voice_view(&v);portENTER_CRITICAL(&mux);bool pending=requested||test_requested||sstv_job;portEXIT_CRITICAL(&mux);return pending||v.tx||v.rx||v.mic_test||v.tx_pending;}
 void voice_identity(uint32_t u,const char*c,uint32_t srv){portENTER_CRITICAL(&mux);uid=u;server_uid=srv;snprintf(own_call,sizeof(own_call),FMO_CALL_PREFIX "%.6s",c);portEXIT_CRITICAL(&mux);}
 void voice_display_call(const char*c){portENTER_CRITICAL(&mux);snprintf(own_call,sizeof(own_call),"%.12s",c);portEXIT_CRITICAL(&mux);}
-void voice_connected(bool on){portENTER_CRITICAL(&mux);bool interrupted=!on&&requested;state.connected=on;if(!on){call_history_push(state.last_caller,state.previous_caller,state.caller);connection_epoch++;if(requested)stop_requested_at=esp_timer_get_time();requested=false;rx_until=0;}bool recovered=on&&!state.tx&&!requested&&!strcmp(state.stop_reason,"mqtt_disconnected");portEXIT_CRITICAL(&mux);if(interrupted)reason("mqtt_disconnected");if(recovered)notice("已重新接入，守听中");if(!on&&qlock){xSemaphoreTake(qlock,portMAX_DELAY);voice_rx_clear(&rx_buffer);xSemaphoreGive(qlock);}}
-bool voice_ptt(bool down){portENTER_CRITICAL(&mux);bool ok=!down||(state.connected&&state.ready&&!test_requested&&esp_timer_get_time()>=rx_until);if(ok){if(!down&&requested)stop_requested_at=esp_timer_get_time();requested=down;if(down){stop_requested_at=0;state.stop_reason[0]=0;}}portEXIT_CRITICAL(&mux);if(!down)reason("key_or_page");if(down&&!ok)notice("尚未接入或频道忙，请稍后重试");return ok;}
-bool voice_toggle_ptt(void){portENTER_CRITICAL(&mux);bool active=requested||state.tx;portEXIT_CRITICAL(&mux);return voice_ptt(!active);}
+void voice_connected(bool on){portENTER_CRITICAL(&mux);bool interrupted=!on&&requested;state.connected=on;if(!on){call_history_push(state.last_caller,state.previous_caller,state.caller);connection_epoch++;sstv_cancel=true;if(requested)stop_requested_at=esp_timer_get_time();requested=false;rx_until=0;}bool recovered=on&&!state.tx&&!requested&&!strcmp(state.stop_reason,"mqtt_disconnected");portEXIT_CRITICAL(&mux);if(interrupted)reason("mqtt_disconnected");if(recovered)notice("已重新接入，守听中");if(!on&&qlock){xSemaphoreTake(qlock,portMAX_DELAY);voice_rx_clear(&rx_buffer);xSemaphoreGive(qlock);}}
+bool voice_ptt(bool down){portENTER_CRITICAL(&mux);bool ok=!down||(state.connected&&state.ready&&!test_requested&&!sstv_job&&esp_timer_get_time()>=rx_until);if(!down&&sstv_job)sstv_cancel=true;if(ok){if(!down&&requested)stop_requested_at=esp_timer_get_time();requested=down;if(down){stop_requested_at=0;state.stop_reason[0]=0;}}portEXIT_CRITICAL(&mux);if(!down)reason("key_or_page");if(down&&!ok)notice("尚未接入或频道忙，请稍后重试");return ok;}
+bool voice_toggle_ptt(void){portENTER_CRITICAL(&mux);bool active=requested||state.tx||sstv_job;portEXIT_CRITICAL(&mux);return voice_ptt(!active);}
 void voice_volume(int d){portENTER_CRITICAL(&mux);int n=state.volume+d;state.volume=n<0?0:n>100?100:n;int v=state.volume;portEXIT_CRITICAL(&mux);nvs_set_u8(nv,"volume",v);nvs_commit(nv);}
 void voice_mute(void){portENTER_CRITICAL(&mux);state.muted=!state.muted;int m=state.muted;portEXIT_CRITICAL(&mux);nvs_set_u8(nv,"mute",m);nvs_commit(nv);}
-void voice_mic_test(bool on){portENTER_CRITICAL(&mux);test_requested=on;requested=false;portEXIT_CRITICAL(&mux);}
+void voice_mic_test(bool on){portENTER_CRITICAL(&mux);test_requested=on;requested=false;if(on)sstv_cancel=true;portEXIT_CRITICAL(&mux);}
 void voice_tone(void){if(!voice_busy()){portENTER_CRITICAL(&mux);tone_requested=true;portEXIT_CRITICAL(&mux);}}
 void voice_reject_oversized(size_t n){portENTER_CRITICAL(&mux);state.rx_oversized++;if(n>state.rx_max_bytes)state.rx_max_bytes=n;portEXIT_CRITICAL(&mux);}
-void voice_receive(const uint8_t*p,size_t n){if(!qlock)return;voice_packet_t v;bool valid=voice_parse(p,n,&v);portENTER_CRITICAL(&mux);if(n>state.rx_max_bytes)state.rx_max_bytes=n;if(!valid)state.rx_rejected++;else if((unsigned)v.count>state.rx_max_frames)state.rx_max_frames=v.count;portEXIT_CRITICAL(&mux);if(!valid)return;portENTER_CRITICAL(&mux);bool drop=v.uid==uid||state.tx||test_requested;portEXIT_CRITICAL(&mux);if(drop)return;
+void voice_receive(const uint8_t*p,size_t n){if(!qlock)return;voice_packet_t v;bool valid=voice_parse(p,n,&v);portENTER_CRITICAL(&mux);if(n>state.rx_max_bytes)state.rx_max_bytes=n;if(!valid)state.rx_rejected++;else if((unsigned)v.count>state.rx_max_frames)state.rx_max_frames=v.count;portEXIT_CRITICAL(&mux);if(!valid)return;portENTER_CRITICAL(&mux);bool drop=v.uid==uid||state.tx||test_requested||sstv_job;portEXIT_CRITICAL(&mux);if(drop)return;
  unsigned samples=0;for(int i=0;i<v.count;i++){int frame=v.mode[i]==2?640:opus_packet_get_nb_samples(v.raw[i],v.len[i],8000);if(frame>0&&frame<=640)samples+=frame;}
  int64_t now=esp_timer_get_time();xSemaphoreTake(qlock,portMAX_DELAY);int lost=voice_rx_push(&rx_buffer,p,n,samples,now);xSemaphoreGive(qlock);
  if(lost<0){portENTER_CRITICAL(&mux);state.rx_rejected++;portEXIT_CRITICAL(&mux);return;}
@@ -143,6 +147,62 @@ static void flush(voice_tx_t*q,uint8_t*frames,int count,uint32_t base,uint16_t f
  voice_tx_pump(q,esp_timer_get_time(),publish_packet);tx_status(q);
  if(q->dropped>drops)notice("网络繁忙，部分语音已跳过");
 }
+static bool sstv_start(uint32_t id,bool probe){
+ if(!id||sstv_rx_active())return false;
+ portENTER_CRITICAL(&mux);
+ bool ok=state.ready&&state.connected&&!requested&&!state.tx&&!state.tx_pending&&!test_requested&&!sstv_job&&esp_timer_get_time()>=rx_until;
+ if(ok){sstv_job=id;sstv_cancel=false;sstv_progress=0;memset(&sstv_diag,0,sizeof(sstv_diag));sstv_diag.probe=probe;}
+ portEXIT_CRITICAL(&mux);return ok;
+}
+bool voice_sstv_start(uint32_t id){return sstv_start(id,false);}
+bool voice_sstv_probe(uint32_t id){return sstv_start(id,true);}
+void voice_sstv_diagnostics(voice_sstv_diag_t *out){portENTER_CRITICAL(&mux);*out=sstv_diag;portEXIT_CRITICAL(&mux);}
+void voice_sstv_stop(void){portENTER_CRITICAL(&mux);sstv_cancel=true;portEXIT_CRITICAL(&mux);}
+void voice_sstv_status(bool *active,unsigned *progress){portENTER_CRITICAL(&mux);*active=sstv_job!=0;*progress=sstv_progress;portEXIT_CRITICAL(&mux);}
+static bool sstv_live(uint32_t epoch){portENTER_CRITICAL(&mux);bool live=!sstv_cancel&&state.connected&&connection_epoch==epoch&&!test_requested;portEXIT_CRITICAL(&mux);return live;}
+static bool sstv_timed_row(void *reader,unsigned row,uint8_t *pixels){
+ int64_t at=esp_timer_get_time();bool ok=sstv_store_reader_row(reader,row,pixels);uint32_t us=esp_timer_get_time()-at;
+ portENTER_CRITICAL(&mux);if(us>sstv_diag.maxRowReadUs)sstv_diag.maxRowReadUs=us;portEXIT_CRITICAL(&mux);return ok;
+}
+/* Probe uses the exact source/encoder and pacing, but never queues or publishes audio. */
+static void send_sstv(uint32_t id,uint32_t epoch,int16_t *pcm,uint8_t *frames,voice_tx_t *q){
+ audio_stop();sstv_rx_break();notice("SSTV: preparing image");
+ sstv_reader_t *reader=sstv_store_reader_open(id);sstv_encoder_t *encoder=reader?calloc(1,sizeof(*encoder)):NULL;
+ const char *failure=!reader?"sstv_image_open_failed":!encoder?"sstv_no_memory":NULL;
+ uint32_t drops=q->dropped,sent=q->sent,retries=q->retries;int predictor=0,index=0;uint16_t sequence=1;bool ok=encoder!=NULL;
+ bool probe;portENTER_CRITICAL(&mux);probe=sstv_diag.probe;portEXIT_CRITICAL(&mux);
+ if(ok)sstv_encoder_init(encoder,sstv_timed_row,reader);
+ struct timeval tv;gettimeofday(&tv,NULL);uint32_t base=(uint32_t)((uint64_t)tv.tv_sec*1000+tv.tv_usec/1000);
+ int64_t start=esp_timer_get_time();
+ portENTER_CRITICAL(&mux);state.tx=ok&&!probe;portEXIT_CRITICAL(&mux);
+ if(ok)notice(probe?"SSTV local test (no transmission)":"SSTV Robot36: sending");
+ while(ok&&encoder->sample<SSTV_TX_TOTAL_SAMPLES&&sstv_live(epoch)){
+  int64_t encode_at=esp_timer_get_time();size_t n=sstv_encoder_read(encoder,pcm,640);uint32_t encode_us=esp_timer_get_time()-encode_at;
+  portENTER_CRITICAL(&mux);if(encode_us>sstv_diag.maxEncodeUs)sstv_diag.maxEncodeUs=encode_us;portEXIT_CRITICAL(&mux);
+  if(encoder->failed||!n){failure="sstv_image_read_failed";ok=false;break;}if(!sstv_live(epoch)){ok=false;break;}
+  memset(pcm+n,0,(640-n)*sizeof(*pcm));radpcm_encode(pcm,frames,sequence-1,&predictor,&index);
+  if(!probe)flush(q,frames,1,base,sequence);
+  sequence++;int64_t due=start+(int64_t)(sequence-1)*80000;
+  while(sstv_live(epoch)&&esp_timer_get_time()<due){if(!probe)voice_tx_pump(q,esp_timer_get_time(),publish_packet);vTaskDelay(pdMS_TO_TICKS(5));}
+  int64_t late=esp_timer_get_time()-due;
+  if(q->dropped!=drops){failure="sstv_queue_dropped";ok=false;}else if(late>160000){failure="sstv_timing_overrun";ok=false;}
+  portENTER_CRITICAL(&mux);sstv_diag.generated=sequence-1;if(late>(int64_t)sstv_diag.maxLateUs)sstv_diag.maxLateUs=late;sstv_progress=encoder->sample*100/SSTV_TX_TOTAL_SAMPLES;portEXIT_CRITICAL(&mux);
+ }
+ bool complete=ok&&encoder&&encoder->sample==SSTV_TX_TOTAL_SAMPLES&&sstv_live(epoch);
+ int64_t deadline=esp_timer_get_time()+600000;
+ while(complete&&!probe&&q->count&&sstv_live(epoch)&&esp_timer_get_time()<deadline){voice_tx_pump(q,esp_timer_get_time(),publish_packet);vTaskDelay(pdMS_TO_TICKS(5));}
+ if(complete&&q->count)failure="sstv_drain_timeout";
+ complete=complete&&!q->count&&q->dropped==drops&&sstv_live(epoch);
+ portENTER_CRITICAL(&mux);
+ if(!complete&&!failure)failure=(!state.connected||connection_epoch!=epoch)?"sstv_disconnected":"sstv_cancelled";
+ sstv_diag.submitted=q->sent-sent;sstv_diag.retries=q->retries-retries;sstv_diag.dropped=q->dropped-drops;sstv_diag.durationMs=(esp_timer_get_time()-start)/1000;
+ snprintf(sstv_diag.reason,sizeof(sstv_diag.reason),"%s",complete?(probe?"sstv_probe_complete":"sstv_complete"):failure);
+ portEXIT_CRITICAL(&mux);
+ voice_tx_clear(q);tx_status(q);free(encoder);sstv_store_reader_close(reader);
+ portENTER_CRITICAL(&mux);sstv_job=0;state.tx=false;portEXIT_CRITICAL(&mux);
+ reason(complete?(probe?"sstv_probe_complete":"sstv_complete"):failure);
+ notice(complete?(probe?"SSTV local test complete (no transmission)":"SSTV sent (delivery unconfirmed)"):failure);
+}
 static void audio_task(void*a){(void)a;int error=0;decoder=opus_decoder_create(8000,1,&error);esp_err_t init=audio_mode(false);int hardware=init==ESP_OK?dac_clock_rate():0;int measured=init==ESP_OK?measure_dac_rate():0;
 #ifdef CONFIG_FMO_BOARD_XINGZHI
  if(measured<7600||measured>8400||state.output_errors)init=ESP_FAIL;
@@ -151,6 +211,8 @@ static void audio_task(void*a){(void)a;int error=0;decoder=opus_decoder_create(8
  while(1){portENTER_CRITICAL(&mux);bool want=requested&&state.connected,testing=test_requested,tone=tone_requested;tone_requested=false;bool connected=state.connected,receiving=esp_timer_get_time()<rx_until;uint32_t epoch=connection_epoch;
 uint32_t media_epoch=epoch+rx_loss_epoch;
 portEXIT_CRITICAL(&mux);
+  portENTER_CRITICAL(&mux);uint32_t image_job=sstv_job;portEXIT_CRITICAL(&mux);
+  if(image_job){voice_tx_clear(&txq);send_sstv(image_job,epoch,pcm,frames,&txq);previous=false;continue;}
   bool same_tx_session=epoch==tx_epoch;
   if(epoch!=tx_epoch){sstv_rx_break();duplicate_state.seen=false;seen=false;}
   if(epoch!=tx_epoch||!connected||receiving||testing||(want&&!previous)){voice_tx_clear(&txq);if(epoch!=tx_epoch||!connected||receiving||testing)collected=0;tx_epoch=epoch;}
