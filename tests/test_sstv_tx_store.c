@@ -29,5 +29,6 @@ int main(void){
  assert(sstv_store_page(entries,6)==5&&entries[0].id==5&&entries[4].id==1);
  assert(sstv_store_newer(entries,5)==20&&entries[0].id==25&&entries[19].id==6);
  assert(sstv_store_newer(entries,0)==20&&entries[0].id==20&&entries[19].id==1);
- for(unsigned i=1;i<=45;i++)assert(sstv_store_delete(i));assert(!rmdir(dir));puts("TX store: import, row reads, abort, corruption, missing image and 45-image paging passed");
+ for(unsigned i=1;i<=45;i++){assert(sstv_store_delete(i));}
+ assert(!rmdir(dir));puts("TX store: import, row reads, abort, corruption, missing image and 45-image paging passed");
 }
