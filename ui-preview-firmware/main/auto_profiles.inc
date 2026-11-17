@@ -40,9 +40,9 @@ static cJSON*auto_relay_json(const relay_t*t){
 }
 static bool auto_relay_same(const relay_t*a,const relay_t*b){return a->uid==b->uid&&a->port==b->port&&!strcmp(a->call,b->call)&&!strcmp(a->host,b->host)&&!strcmp(a->fingerprint,b->fingerprint);}
 static bool auto_use_relay(const relay_t*t){
- for(int i=0;i<relays_count();i++){relay_t r;if(relays_get(i,&r)&&auto_relay_same(t,&r))return relays_select(i);}
+ for(int i=0;i<relays_count();i++){relay_t r;if(relays_get(i,&r)&&auto_relay_same(t,&r))return select_relay_for_voice(i);}
  cJSON*j=auto_relay_json(t);if(!j)return false;const char*error=relays_add(j);cJSON_Delete(j);if(error)return false;
- for(int i=0;i<relays_count();i++){relay_t r;if(relays_get(i,&r)&&auto_relay_same(t,&r))return relays_select(i);}
+ for(int i=0;i<relays_count();i++){relay_t r;if(relays_get(i,&r)&&auto_relay_same(t,&r))return select_relay_for_voice(i);}
  return false;
 }
 static void auto_resume_relay(void){
@@ -58,12 +58,12 @@ static void auto_resume_relay(void){
 static void auto_route_relay(const relay_t*t){
  if(voice_busy()||identity_restart_pending){auto_note("通联中或正在切换，请稍后重试");return;}
  char accepted[10][44]={{0}};int count=discovery_accepted_roots(t,accepted);uint32_t mask=atomic_load(&auto_ca_mask);
- if(!mask||!count){if(auto_use_relay(t)){auto_connection_blocked=false;voice_connected(false);auto_note(count?"使用当前体系接入":"体系资料未确认，保持当前身份接入");}else auto_note("选择中继失败，原身份保留");return;}
+ if(!mask||!count){if(auto_use_relay(t)){auto_connection_blocked=false;auto_note(count?"使用当前体系接入":"体系资料未确认，保持当前身份接入");}else auto_note("选择中继失败，原身份保留");return;}
  bool valid[11]={0};char roots[11][44]={{0}};
  for(int id=1;id<=10;id++)if(id==selected_ca||(mask&(1u<<(id-1))))valid[id]=auto_profile_valid(id,roots[id],NULL);
  int target=auto_ca_choose(mask,selected_ca,valid,roots,accepted,count);
  if(!target){auto_note("没有匹配的有效证书，请检查自动体系勾选");return;}
- if(target==selected_ca){if(auto_use_relay(t)){auto_connection_blocked=false;voice_connected(false);auto_note("当前证书可接入，无需切换体系");}else auto_note("选择中继失败，原身份保留");return;}
+ if(target==selected_ca){if(auto_use_relay(t)){auto_connection_blocked=false;auto_note("当前证书可接入，无需切换体系");}else auto_note("选择中继失败，原身份保留");return;}
  auto_relay_intent_t intent={.magic=AUTO_RELAY_MAGIC,.profile=target,.relay=*t};if(!auto_profile_valid(target,NULL,intent.identity)){auto_note("目标证书已变化，未切换");return;}
  // Persist the outgoing identity bank before staging a switch, including custom CAs.
  esp_err_t e=ESP_OK;

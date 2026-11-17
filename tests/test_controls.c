@@ -1,10 +1,13 @@
 #include "buttons.h"
+#include "display_idle.h"
 #include <assert.h>
 #include <stdio.h>
 static int counts[5],page,tx;static buttons_t b;
 static void cb(int key,key_action_t action,void*x){(void)x;counts[action]++;if(action==KEY_CANCEL||action==KEY_PTT_STOP)tx=0;if(action==KEY_PTT_START)tx=1;if(!page&&key==1){if(action==KEY_SHORT)tx=!tx;if(action==KEY_LONG)tx=0;}if(action==KEY_LONG&&key==2){page=1;tx=0;buttons_block(&b);}}
 static void step(int mask,int t){buttons_step(&b,mask,t,!page);}
 static void reset(void){for(int i=0;i<5;i++)counts[i]=0;page=tx=0;buttons_init(&b,0,cb,0);}
+static display_idle_t idle;static screen_sleep_t sleep_state;
+static void wake_step(int mask,int t){display_idle_screen_step(&idle,&sleep_state,t,false,mask);step(sleep_state.sleeping||sleep_state.consume?0:mask,t);}
 int main(void){
  reset();step(2,1000);step(2,1031);step(0,1100);step(0,1131);assert(tx&&counts[KEY_SHORT]==1);step(0,5000);assert(tx);step(2,5100);step(2,5131);step(0,5200);step(0,5231);assert(!tx&&counts[KEY_SHORT]==2);
  reset();step(2,1000);step(2,1031);step(0,1100);step(0,1131);step(2,1150);step(2,1181);step(0,1200);step(0,1231);assert(tx&&counts[KEY_SHORT]==1);
@@ -17,5 +20,13 @@ int main(void){
  reset();buttons_set_momentary(&b,true);step(0,1);step(3,100);step(3,131);assert(!tx&&!counts[KEY_PTT_START]);
  reset();page=1;buttons_set_momentary(&b,true);step(0,1);step(2,100);step(2,131);step(0,200);step(0,231);assert(!tx&&counts[KEY_SHORT]==1);
  reset();buttons_set_momentary(&b,true);step(0,1);step(2,100);step(2,131);buttons_set_momentary(&b,false);assert(!tx);step(0,200);step(0,231);assert(!tx&&!counts[KEY_SHORT]);
+ // Exercise the production sleep mask followed by real button debounce in both PTT modes.
+ for(int momentary=0;momentary<2;momentary++){
+  reset();idle=(display_idle_t){0};sleep_state=(screen_sleep_t){0};buttons_set_momentary(&b,momentary);
+  wake_step(0,1);wake_step(0,600001);assert(sleep_state.sleeping);
+  wake_step(2,600100);wake_step(2,600150);wake_step(0,600200);wake_step(0,600250);assert(!tx&&!sleep_state.consume&&!sleep_state.sleeping);
+  wake_step(2,600500);wake_step(2,600550);if(momentary)assert(tx);
+  wake_step(0,600600);wake_step(0,600650);assert(momentary?!tx:tx);
+ }
  puts("PASS: momentary press/release, menu selection, chord cancellation and mode switch; toggle persists after release, second click stops, bounce cooldown, long-B stop, menu/long release isolation, chord cancel, boot hold, debounce");
 }

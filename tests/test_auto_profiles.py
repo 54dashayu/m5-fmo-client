@@ -52,11 +52,14 @@ static const char*wire_validate_bundle(const cJSON*b,const uint8_t*pub,const cha
 static esp_err_t fail(request_t*r,const char*s){r->output=cJSON_CreateObject();cJSON_AddStringToObject(r->output,"error",s);return 0;}
 static esp_err_t success(request_t*r,const char*s){r->output=cJSON_CreateObject();cJSON_AddStringToObject(r->output,"message",s);return 0;}
 static bool voice_busy(void){return busy;}
-static void voice_connected(bool b){(void)b;}
+static bool connected=true;
+static void voice_connected(bool b){connected=b;}
 static relay_t saved[10];static int saved_count,chosen=-1;static bool relay_fail;
 static int relays_count(void){return saved_count;}
 static bool relays_get(int i,relay_t*r){if(i<0||i>=saved_count)return false;*r=saved[i];return true;}
-static bool relays_select(int i){if(relay_fail)return false;chosen=i;return true;}
+static uint32_t relay_revision;
+static void relays_current(relay_t*r,uint32_t*rev){if(r&&chosen>=0)*r=saved[chosen];if(rev)*rev=relay_revision;}
+static bool relays_select(int i){if(relay_fail||i<0||i>=saved_count)return false;if(chosen!=i)relay_revision++;chosen=i;return true;}
 static const char*relays_add(cJSON*j){if(relay_fail)return "store failed";relay_t*r=&saved[saved_count++];snprintf(r->name,65,"%s",js(j,"name"));snprintf(r->call,8,"%s",js(j,"callsign"));snprintf(r->host,64,"%s",js(j,"host"));snprintf(r->fingerprint,44,"%s",js(j,"fingerprint"));r->uid=cJSON_GetNumberValue(cJSON_GetObjectItem(j,"uid"));r->port=cJSON_GetNumberValue(cJSON_GetObjectItem(j,"port"));return NULL;}
 static char accepted[10][44];static int accepted_count;
 static int discovery_accepted_roots(const relay_t*t,char out[10][44]){(void)t;memcpy(out,accepted,sizeof(accepted));return accepted_count;}
@@ -79,8 +82,14 @@ int main(void){
  // Pending switch survives interruption without selecting an unrelated default.
  auto_resume_relay();assert(auto_connection_blocked&&slot("auto_target",false)>=0);
  active(2);nvs_erase_key(nv,"profile_next");saved_count=0;auto_resume_relay();assert(!auto_connection_blocked&&chosen==0&&saved[0].uid==1845&&slot("auto_target",false)<0);
- switched=0;accepted_count=2;strcpy(accepted[1],"BH");auto_route_relay(&target);assert(!switched&&selected_ca==2);
- assert(configure("{\"profiles\":[]}"));assert(!atomic_load(&auto_ca_mask));auto_route_relay(&target);assert(!switched);
+ // An unchanged relay must preserve the established voice link (both automatic and manual routing).
+ connected=true;assert(select_relay_for_voice(chosen)&&connected);
+ relay_fail=true;assert(!select_relay_for_voice(chosen)&&connected);relay_fail=false;
+ saved[1]=saved[0];saved[1].uid++;saved_count=2;
+ assert(select_relay_for_voice(1)&&!connected);
+ assert(select_relay_for_voice(0));connected=true;
+ switched=0;accepted_count=2;strcpy(accepted[1],"BH");auto_route_relay(&target);assert(!switched&&selected_ca==2&&connected);
+ assert(configure("{\"profiles\":[]}"));assert(!atomic_load(&auto_ca_mask));auto_route_relay(&target);assert(!switched&&connected);
  bank(1,true,1600000000);assert(!auto_profile_valid(1,NULL,NULL));bank(1,true,1800000000);uint8_t bad[32]={0};nvs_set_blob(nv,"seed1",bad,32);assert(!auto_profile_valid(1,NULL,NULL));
  wall=0;assert(!auto_profile_valid(2,NULL,NULL));wall=1700000100;
  cJSON*out=cJSON_CreateObject(),*rows=cJSON_AddArrayToObject(out,"profiles"),*row=cJSON_CreateObject();cJSON_AddNumberToObject(row,"id",2);cJSON_AddItemToArray(rows,row);auto_profiles_describe(out);assert(cJSON_IsTrue(cJSON_GetObjectItem(row,"autoAvailable")));cJSON_Delete(out);
@@ -89,6 +98,7 @@ int main(void){
 }
 '''
 with tempfile.TemporaryDirectory() as td:
- p=Path(td)/'test.c';p.write_text(pre+(main/'auto_profiles.inc').read_text()+tail)
+ web=(main/'device_web.c').read_text();helper=web[web.index('static bool select_relay_for_voice('):web.index('#include "auto_profiles.inc"')]
+ p=Path(td)/'test.c';p.write_text(pre+helper+(main/'auto_profiles.inc').read_text()+tail)
  subprocess.run(['cc','-Wall','-Wextra','-Werror','-I'+str(main),'-I'+str(cj),str(p),str(cj/'cJSON.c'),'-o',td+'/test'],check=True)
  subprocess.run([td+'/test'],check=True)

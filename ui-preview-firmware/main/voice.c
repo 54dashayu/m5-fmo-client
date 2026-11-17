@@ -185,7 +185,7 @@ static bool sstv_timed_row(void *reader,unsigned row,uint8_t *pixels){
 }
 /* Probe uses the exact source/encoder and pacing, but never queues or publishes audio. */
 static void send_sstv(uint32_t id,uint32_t epoch,int16_t *pcm,uint8_t *frames,voice_tx_t *q){
- audio_stop();sstv_rx_break();notice("SSTV: preparing image");
+ audio_stop();sstv_rx_break();notice("正在准备 SSTV 图片");
 #ifdef FMO_SSTV_STREAMING
  sstv_rx_enable(false); /* Release a diagnostic-only RX preparation before sharing its workspace. */
  // Robot36 TX is RADPCM-only. Keep its unused Opus receiver off the small M5 heap.
@@ -199,7 +199,7 @@ static void send_sstv(uint32_t id,uint32_t epoch,int16_t *pcm,uint8_t *frames,vo
  struct timeval tv;gettimeofday(&tv,NULL);uint32_t base=(uint32_t)((uint64_t)tv.tv_sec*1000+tv.tv_usec/1000);
  int64_t start=esp_timer_get_time();
  portENTER_CRITICAL(&mux);state.tx=ok&&!probe;portEXIT_CRITICAL(&mux);
- if(ok)notice(probe?"SSTV local test (no transmission)":"SSTV Robot36: sending");
+ if(ok)notice(probe?"正在本地编码测试（不发射）":"正在发送 SSTV Robot36");
  while(ok&&encoder->sample<SSTV_TX_TOTAL_SAMPLES&&sstv_live(epoch)){
   int64_t encode_at=esp_timer_get_time();size_t n=sstv_encoder_read(encoder,pcm,640);uint32_t encode_us=esp_timer_get_time()-encode_at;
   portENTER_CRITICAL(&mux);if(encode_us>sstv_diag.maxEncodeUs)sstv_diag.maxEncodeUs=encode_us;portEXIT_CRITICAL(&mux);
@@ -228,7 +228,7 @@ static void send_sstv(uint32_t id,uint32_t epoch,int16_t *pcm,uint8_t *frames,vo
 #endif
  portENTER_CRITICAL(&mux);sstv_job=0;state.tx=false;portEXIT_CRITICAL(&mux);
  reason(complete?(probe?"sstv_probe_complete":"sstv_complete"):failure);
- notice(complete?(probe?"SSTV local test complete (no transmission)":"SSTV sent (delivery unconfirmed)"):failure);
+ notice(complete?(probe?"本地编码测试完成（未发射）":"SSTV 已发完，请确认接收结果"):failure);
 }
 static void audio_task(void*a){(void)a;int error=0;decoder=opus_decoder_create(8000,1,&error);esp_err_t init=audio_mode(false);int hardware=init==ESP_OK?dac_clock_rate():0;int measured=init==ESP_OK?measure_dac_rate():0;
 #ifdef CONFIG_FMO_BOARD_XINGZHI
