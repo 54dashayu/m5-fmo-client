@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
-import {webcrypto} from 'node:crypto';
+import {webcrypto,createHash} from 'node:crypto';
+import {resolveMd5} from '../web-flasher/flash-hash.mjs';
+const realHash=data=>createHash('md5').update(data).digest('hex');
+for(const module of [{default:realHash},{md5:realHash}]) assert.equal(resolveMd5(module)(new Uint8Array([0,128,255])),realHash(new Uint8Array([0,128,255])));
+for(const module of [{},{default:()=>''}]) assert.throws(()=>resolveMd5(module),/校验组件加载失败/);
 import {BOARDS,LAYOUTS,partitionPlan,validateManifest,validPartitions,selectedParts} from '../web-flasher/board-policy.mjs';
 const source=fs.readFileSync(new URL('../web-flasher/app.js',import.meta.url),'utf8')
  .replace(/^import .*;\n/gm,'')

@@ -1,4 +1,5 @@
 import {BOARDS,validateManifest,validPartitions,selectedParts,partitionPlan} from './board-policy.mjs';
+import {resolveMd5} from './flash-hash.mjs';
 const $=id=>document.getElementById(id);
 let boardId='m5-fire';
 let busy=false, session=null, currentManifest=null, refreshing=false;
@@ -9,7 +10,7 @@ const loadFlashTools=()=>flashToolsPromise??=Promise.all([
 ]).then(([esptool,hash])=>({
  ESPLoader:esptool.ESPLoader,
  Transport:esptool.Transport,
- md5:hash.md5
+ md5:resolveMd5(hash)
 }));
 const supported=isSecureContext && 'serial' in navigator;
 $('support').textContent=supported?'先选择硬件、连接设备并检查固件，再点击确认开始刷写。连接检查会使设备进入刷写模式，但不会写入 Flash。':'当前浏览器不支持在线刷写。请用电脑 Chrome / Edge 打开此 HTTPS 页面，或下载固件包。';
@@ -36,7 +37,7 @@ async function refreshVersion(){
  finally{refreshing=false;update();}
 }
 $('refreshVersion').addEventListener('click',()=>refreshVersion().catch(()=>{}));
-$('copyLog').addEventListener('click',async()=>{try{await navigator.clipboard.writeText('网页版本：20261114.1\n'+$('versionStatus').textContent+'\n'+$('log').textContent);$('copyLog').textContent='已复制日志';}catch{$('copyLog').textContent='复制失败，请选择日志文字复制';}});
+$('copyLog').addEventListener('click',async()=>{try{await navigator.clipboard.writeText('网页版本：20261117.6\n'+$('versionStatus').textContent+'\n'+$('log').textContent);$('copyLog').textContent='已复制日志';}catch{$('copyLog').textContent='复制失败，请选择日志文字复制';}});
 function changeBoard(){boardId=$('boardSelect').value;const b=BOARDS[boardId];$('hardware').checked=false;$('installConfirm').checked=false;$('hardwareDetails').textContent=b.hardware;$('selectedPhoto').src=b.photo;$('selectedPhoto').alt=b.name+' 实机照片';$('boardIntro').textContent=b.name;$('status').textContent='等待选择设备';refreshVersion().catch(()=>{});}
 $('boardSelect').addEventListener('change',changeBoard);changeBoard();
 // Original ESP32 + USB UART: keep GPIO0 released and pulse EN through RTS.
@@ -58,7 +59,7 @@ $('flash').addEventListener('click',async()=>{
  const install=document.querySelector('input[name=mode]:checked').value==='install';
  const port=await navigator.serial.requestPort();
  const {ESPLoader,Transport,md5}=await loadFlashTools();
- status('下载并校验固件…');const manifest=await refreshVersion();log('固件 v'+manifest.version+' · 网页 20261114.1 · 波特率 115200');const board=BOARDS[boardId];const parts=selectedParts(manifest,install);
+ status('下载并校验固件…');const manifest=await refreshVersion();log('固件 v'+manifest.version+' · 网页 20261117.6 · 波特率 115200');const board=BOARDS[boardId];const parts=selectedParts(manifest,install);
  const expected=install?board.addresses:[board.app];if(JSON.stringify(parts.map(p=>p.address))!==JSON.stringify(expected))throw Error('固件清单分区不符合预期');
  const files=await Promise.all(parts.map(async p=>({address:p.address,data:await binary(p)})));
  const transport=new Transport(port,true);const loader=new ESPLoader({transport,baudrate:115200,terminal:{clean(){},write:log,writeLine:log},debugLogging:false});session={transport,loader,files,boardId,md5,ready:false};status('正在连接 '+board.name+'…');await loader.main();if(loader.chip.CHIP_NAME!==board.chip)throw Error('芯片与所选硬件不符，已停止，未写入');
