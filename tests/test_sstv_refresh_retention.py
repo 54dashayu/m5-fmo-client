@@ -7,15 +7,16 @@ pre=r'''
 #include <stdint.h>
 #include <stdio.h>
 #include <assert.h>
+#include <string.h>
 #define FMO_SSTV_STREAMING 1
 #define FMO_FULL_SSTV 1
 #define FMO_WIDTH 320
 #define LV_OBJ_FLAG_HIDDEN 1
 #define LV_TEXT_ALIGN_RIGHT 1
 static int image_obj,other;static int *sstv_image=&image_obj,*title=&other,*brand=&other,*footer=&other,*lines[5]={&other};
-static bool hidden=true,sstv_start_failed,sstv_redraw_pending;static unsigned sstv_generation=2,sstv_lines=100,sstv_saved;static int sstv_status;static char image_notice[20];
+static bool hidden=true,sstv_start_failed,sstv_redraw_pending;static unsigned sstv_generation=2,sstv_lines=100,sstv_saved,sstv_last_saved;static int sstv_status;static char image_notice[20];
 
-enum{SSTV_RECEIVING,SSTV_COMPLETE,SSTV_INTERRUPTED};
+enum{SSTV_WAITING,SSTV_RECEIVING,SSTV_COMPLETE,SSTV_INTERRUPTED};
 static unsigned image_invalidations,overlap_moves;
 static void ensure_image(void){}
 static bool lv_obj_has_flag(void*o,int f){(void)f;return o==sstv_image&&hidden;}
@@ -31,12 +32,16 @@ static void lv_obj_set_pos(void*o,int x,int y){(void)x;lv_obj_set_y(o,y);}
 static void lv_obj_set_width(void*o,int w){(void)o;(void)w;}
 static void lv_obj_set_style_text_align(void*o,int a,int p){(void)o;(void)a;(void)p;}
 static int lv_disp_get_ver_res(void*o){(void)o;return 240;}
-static const char*sstv_store_error(void){return 0;}
+static bool mock_busy;
+static bool sstv_rx_start_busy(void){return true;}
+static bool voice_busy(void){return mock_busy;}
+static bool sstv_rx_enable(bool on){return on;}
+static const char*sstv_rx_start_error(void){return "waiting";}
 static void refresh_receive(void){
 '''
 tail=r'''
 }
-int main(void){refresh_receive();assert(image_invalidations==1&&!overlap_moves);for(unsigned i=0;i<400;i++)refresh_receive();assert(image_invalidations==1&&!overlap_moves);sstv_status=SSTV_COMPLETE;for(unsigned i=0;i<100;i++)refresh_receive();assert(image_invalidations==1&&!overlap_moves);puts("PASS actual RX refresh: first reveal only, 500 status updates preserve high-resolution pixels and keep labels outside image");}
+int main(void){sstv_start_failed=true;sstv_last_saved=42;mock_busy=true;refresh_receive();assert(sstv_start_failed&&sstv_last_saved==42);mock_busy=false;refresh_receive();assert(!sstv_start_failed&&sstv_last_saved==42);sstv_last_saved=0;refresh_receive();assert(image_invalidations==1&&!overlap_moves);for(unsigned i=0;i<400;i++)refresh_receive();assert(image_invalidations==1&&!overlap_moves);sstv_status=SSTV_COMPLETE;for(unsigned i=0;i<100;i++)refresh_receive();assert(image_invalidations==1&&!overlap_moves);puts("PASS actual RX refresh: first reveal only, 500 status updates preserve high-resolution pixels and keep labels outside image");}
 '''
 with tempfile.TemporaryDirectory() as d:
  p=Path(d)/'test.c';p.write_text(pre+body+tail);subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror',str(p),'-o',d+'/test'],check=True);subprocess.run([d+'/test'],check=True)

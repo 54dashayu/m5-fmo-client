@@ -10,10 +10,9 @@ pre=r'''
 #include <stddef.h>
 #include <assert.h>
 static int storage;static void *decoder=&storage;
-static bool active,valid=true;static unsigned frees,creates,decodes;
+static bool valid=true;static unsigned frees,creates,decodes;
 #ifdef FMO_SSTV_STREAMING
 static bool fail;
-static bool sstv_rx_active(void){return active;}
 static void opus_decoder_destroy(void*p){assert(p==&storage);frees++;}
 static void *opus_decoder_create(int rate,int channels,int*error){assert(rate==8000&&channels==1);creates++;*error=fail?-1:0;return fail?NULL:&storage;}
 #endif
@@ -22,7 +21,7 @@ static bool radpcm_decode(const uint8_t*d,int16_t*out){assert(d&&out);return val
 '''
 tail=r'''
 int main(void){uint8_t data[328]={0};int16_t pcm[640];
-assert(decode_receive_frame(2,data,328,pcm)==640&&decoder);active=true;
+assert(decode_receive_frame(2,data,328,pcm)==640);
 for(int i=0;i<463;i++)assert(decode_receive_frame(2,data,328,pcm)==640);
 #ifdef FMO_SSTV_STREAMING
 assert(!decoder&&frees==1&&!creates);fail=true;
@@ -30,7 +29,7 @@ assert(decode_receive_frame(1,data,10,pcm)==-1&&!decoder&&!decodes);fail=false;
 assert(decode_receive_frame(1,data,10,pcm)==160&&decoder&&creates==2);
 assert(decode_receive_frame(1,data,10,pcm)==160&&creates==2);
 assert(decode_receive_frame(2,data,328,pcm)==640&&!decoder&&frees==2);
-active=false;assert(decode_receive_frame(1,data,10,pcm)==160&&decoder);
+assert(decode_receive_frame(1,data,10,pcm)==160&&decoder);
 #else
 assert(decoder&&!frees&&!creates);assert(decode_receive_frame(1,data,10,pcm)==160);
 #endif

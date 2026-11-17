@@ -62,7 +62,10 @@ test=r'''
 #ifdef CONFIG_IDF_TARGET_ESP32
 #undef calloc
 #endif
-bool voice_busy(void){return false;}
+static bool audio_busy;
+bool voice_busy(void){return audio_busy;}
+const char*sstv_store_error(void){return NULL;}
+const char*sstv_store_save_error(void){return "storage failure";}
 #include <assert.h>
 #include <stdio.h>
 static unsigned writes;
@@ -83,7 +86,7 @@ int main(void){int16_t pcm[640]={0};uint32_t id=0;
 assert(sstv_workspace_claim(SSTV_WORKSPACE_GALLERY));assert(!sstv_rx_init()&&init_error==4);sstv_workspace_release(SSTV_WORKSPACE_GALLERY);
 #endif
 sstv_rx_feed(pcm,640,1,2,3);assert(!queue);assert(sstv_rx_init());assert(!atomic_load(&enabled));sstv_rx_feed(pcm,640,1,2,3);assert(!queue->count);assert(!sstv_rx_save(&id));
-assert(sstv_rx_enable(true));
+audio_busy=true;assert(!sstv_rx_enable(true)&&sstv_rx_start_busy());assert(strstr(sstv_rx_start_error(),"通联中"));audio_busy=false;assert(sstv_rx_enable(true)&&!sstv_rx_start_busy());
 #ifdef FMO_SSTV_STREAMING
 uint8_t preview_line[SSTV_PREVIEW_WIDTH+2];memset(preview_line,0xa5,sizeof(preview_line));memset(preview+3*SSTV_PREVIEW_WIDTH,0x42,SSTV_PREVIEW_WIDTH);assert(sstv_rx_preview_row(3,preview_line+1));assert(!semaphore_depth&&preview_line[0]==0xa5&&preview_line[sizeof(preview_line)-1]==0xa5);for(unsigned i=1;i<=SSTV_PREVIEW_WIDTH;i++)assert(preview_line[i]==0x42);mock_lock_busy=1;assert(sstv_rx_preview_row(3,preview_line+1));assert(!preview_mux);mock_lock_busy=0;assert(!sstv_rx_preview_row(SSTV_PREVIEW_HEIGHT,preview_line+1));assert(!semaphore_depth);
 memset(preview,0x5a,SSTV_PREVIEW_BYTES);assert(sstv_rx_enable(true));for(unsigned i=0;i<SSTV_PREVIEW_BYTES;i++)assert(!preview[i]);

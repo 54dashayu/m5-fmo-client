@@ -19,6 +19,7 @@ int sstv_store_list(sstv_entry_t *e){(void)e;return 3;}
 static bool busy;
 static unsigned gallery_revision;
 unsigned sstv_store_revision(void){return gallery_revision;}
+static uint32_t sstv_last_saved;
 static uint32_t tx_image_id;static bool tx_launch_failed;
 static unsigned tx_starts;static uint32_t tx_last_id;
 static bool voice_sstv_start(uint32_t id){tx_starts++;tx_last_id=id;return id&&!busy;}
@@ -42,7 +43,7 @@ int main(void){page=MEDIA;selection=0;key(0);assert(selection==3);key(2);assert(
 sstv_status=SSTV_WAITING;key(1);assert(!saves);sstv_status=SSTV_RECEIVING;key(1);key(2);assert(!saves&&page==SSTV);key(0);assert(page==MEDIA);
 page=SSTV;sstv_status=SSTV_COMPLETE;busy=true;key(1);assert(!saves);busy=false;key(1);
 #ifdef FMO_FULL_SSTV
-assert(saves==1&&sstv_saved==0&&sstv_status==SSTV_WAITING&&page==SSTV);key(1);assert(saves==1);
+assert(saves==1&&sstv_saved==0&&sstv_last_saved==42&&sstv_status==SSTV_WAITING&&page==SSTV);key(1);assert(saves==1);
 sstv_status=SSTV_COMPLETE;save_ok=false;key(1);assert(saves==2&&sstv_status==SSTV_COMPLETE&&!sstv_saved);save_ok=true;key(1);assert(saves==3&&sstv_status==SSTV_WAITING&&!sstv_saved);key(0);assert(page==MEDIA);
 #else
 assert(saves==1&&sstv_saved==42);key(1);assert(saves==1);
@@ -56,7 +57,7 @@ page=GALLERY;gallery_count=3;selection=0;key(0);assert(selection==2);key(2);asse
 page=GALLERY;gallery_count=0;key(0);key(2);assert(loads==2);key(1);assert(page==MEDIA);
 #endif
 page=GALLERY;gallery_count=1;selection=0;gallery_entries[0].id=42;busy=false;key(1);assert(page==SSTV_TX_CONFIRM&&tx_starts==0);key(1);assert(page==SSTV_TX_PAGE&&tx_starts==1&&tx_last_id==42&&!tx_launch_failed);key(0);assert(page==GALLERY);busy=true;gallery_count=1;key(1);key(1);assert(page==SSTV_TX_PAGE&&tx_launch_failed&&tx_starts==2);busy=false;
-puts("PASS image UI: entry selection, exit while receiving, manual interrupted save, busy/duplicate save guard, gallery wrap and empty state");}
+(void)sstv_last_saved;puts("PASS image UI: entry selection, exit while receiving, manual interrupted save, busy/duplicate save guard, gallery wrap and empty state");}
 '''
 with tempfile.TemporaryDirectory() as td:
  p=Path(td)/'ui.c';p.write_text(pre+'static void key(int k){'+code+'}\n'+tail)

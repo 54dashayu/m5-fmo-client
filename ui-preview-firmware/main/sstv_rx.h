@@ -9,6 +9,8 @@ uint8_t *sstv_rx_pixels(void);
 bool sstv_rx_snapshot(sstv_status_t *status, unsigned *lines, unsigned *generation);
 
 bool sstv_rx_enable(bool enabled);
+const char *sstv_rx_start_error(void);
+bool sstv_rx_start_busy(void);
 bool sstv_rx_save(uint32_t *id);
 
 typedef struct {bool enabled,ready;unsigned init_error,internal_free,internal_largest,samples,stream_breaks,timeouts,drops,clipped,max_process_us,max_store_us,store_stalls,max_feed_gap_us,snapshots,snapshot_misses,preview_nonzero,preview_high_rows,preview_skipped,preview_replay_rows,preview_read_errors,lines,leader_max,vis_starts,vis_code;int frequency,status;} sstv_diagnostics_t;

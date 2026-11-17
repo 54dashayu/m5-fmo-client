@@ -152,12 +152,12 @@ static void flush(voice_tx_t*q,uint8_t*frames,int count,uint32_t base,uint16_t f
  voice_tx_pump(q,esp_timer_get_time(),publish_packet);tx_status(q);
  if(q->dropped>drops)notice("网络繁忙，部分语音已跳过");
 }
-// Audio-task owned: reclaim the unused Opus state while M5 receives RADPCM SSTV.
+// Audio-task owned: keep unused Opus state off the M5 heap for all RADPCM audio.
 // Recreate lazily for the next Opus frame, including ordinary voice on this page.
 static int decode_receive_frame(unsigned codec,const uint8_t *data,int length,int16_t *pcm){
  if(codec==2){
 #ifdef FMO_SSTV_STREAMING
-  if(sstv_rx_active()&&decoder){opus_decoder_destroy(decoder);decoder=NULL;}
+  if(decoder){opus_decoder_destroy(decoder);decoder=NULL;}
 #endif
   return radpcm_decode(data,pcm)?640:-1;
  }
@@ -223,9 +223,7 @@ static void send_sstv(uint32_t id,uint32_t epoch,int16_t *pcm,uint8_t *frames,vo
  snprintf(sstv_diag.reason,sizeof(sstv_diag.reason),"%s",complete?(probe?"sstv_probe_complete":"sstv_complete"):failure);
  portEXIT_CRITICAL(&mux);
  voice_tx_clear(q);tx_status(q);free(encoder);sstv_store_reader_close(reader);
-#ifdef FMO_SSTV_STREAMING
- {int error=0;decoder=opus_decoder_create(8000,1,&error);}
-#endif
+// Opus is restored by decode_receive_frame only if an Opus packet arrives.
  portENTER_CRITICAL(&mux);sstv_job=0;state.tx=false;portEXIT_CRITICAL(&mux);
  reason(complete?(probe?"sstv_probe_complete":"sstv_complete"):failure);
  notice(complete?(probe?"本地编码测试完成（未发射）":"SSTV 已发完，请确认接收结果"):failure);
@@ -234,7 +232,12 @@ static void audio_task(void*a){(void)a;int error=0;decoder=opus_decoder_create(8
 #ifdef CONFIG_FMO_BOARD_XINGZHI
  if(measured<7600||measured>8400||state.output_errors)init=ESP_FAIL;
 #endif
- audio_stop();int mic_initial=0;int mic_measured=init==ESP_OK?calibrate_mic_rate(&mic_initial):0;portENTER_CRITICAL(&mux);state.mic_rate=mic_measured;state.mic_initial_rate=mic_initial;state.mic_clock_request=mic_clock_request;state.dac_rate=hardware;state.dma_rate=measured;state.ready=init==ESP_OK&&decoder!=NULL&&hardware>=7800&&hardware<=8200&&mic_measured>=7840&&mic_measured<=8160;portEXIT_CRITICAL(&mux);if(!state.ready){notice("音频初始化失败");ESP_LOGE("voice","init=%d opus=%d dac_rate=%d",init,error,measured);audio_handle=NULL;vTaskDelete(NULL);return;}notice("音频已就绪");packet_t packet;int16_t pcm[640];uint16_t raw[640];uint8_t frames[656];voice_tx_t txq={0};uint32_t tx_epoch=0,tx_start_drops=0;int collected=0,predictor=0,index=0;voice_mic_filter_t mic_filter={0};bool previous=false,was_test=false;uint16_t sequence=1;uint32_t base=0,last_uid=0,last_base=0;voice_dedup_t duplicate_state={0};bool seen=false,underrun=false;int64_t started=0,silence_until=0,buffered_session=-1;
+ audio_stop();int mic_initial=0;int mic_measured=init==ESP_OK?calibrate_mic_rate(&mic_initial):0;portENTER_CRITICAL(&mux);state.mic_rate=mic_measured;state.mic_initial_rate=mic_initial;state.mic_clock_request=mic_clock_request;state.dac_rate=hardware;state.dma_rate=measured;state.ready=init==ESP_OK&&decoder!=NULL&&hardware>=7800&&hardware<=8200&&mic_measured>=7840&&mic_measured<=8160;portEXIT_CRITICAL(&mux);if(!state.ready){notice("音频初始化失败");ESP_LOGE("voice","init=%d opus=%d dac_rate=%d",init,error,measured);audio_handle=NULL;vTaskDelete(NULL);return;}
+#ifdef FMO_SSTV_STREAMING
+ // Initialization validated the codec; idle/RADPCM operation needs no Opus allocation.
+ opus_decoder_destroy(decoder);decoder=NULL;
+#endif
+ notice("音频已就绪");packet_t packet;int16_t pcm[640];uint16_t raw[640];uint8_t frames[656];voice_tx_t txq={0};uint32_t tx_epoch=0,tx_start_drops=0;int collected=0,predictor=0,index=0;voice_mic_filter_t mic_filter={0};bool previous=false,was_test=false;uint16_t sequence=1;uint32_t base=0,last_uid=0,last_base=0;voice_dedup_t duplicate_state={0};bool seen=false,underrun=false;int64_t started=0,silence_until=0,buffered_session=-1;
  while(1){portENTER_CRITICAL(&mux);bool want=requested&&state.connected,testing=test_requested,tone=tone_requested;tone_requested=false;bool connected=state.connected,receiving=esp_timer_get_time()<rx_until;uint32_t epoch=connection_epoch;
 uint32_t media_epoch=epoch+rx_loss_epoch;
 portEXIT_CRITICAL(&mux);

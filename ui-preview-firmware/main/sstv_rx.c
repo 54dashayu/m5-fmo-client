@@ -246,11 +246,22 @@ memcpy(preview
     xSemaphoreGive(lock);return true;
 }
 
+bool sstv_rx_start_busy(void){return init_error==5;}
+const char *sstv_rx_start_error(void){
+    switch(init_error){
+    case 1:case 2:return "接收内存不足，请退出后重试";
+    case 3:return "接收任务启动失败，请退出后重试";
+    case 4:return "相册或发射正在占用接收缓冲";
+    case 5:return "通联中，等待空闲后开启接收";
+    case 6:return sstv_store_error()?sstv_store_error():sstv_store_save_error();
+    default:return "接收尚未就绪，请退出后重试";
+    }
+}
 bool sstv_rx_enable(bool on){
-    if(on&&voice_busy())return false;
+    if(on&&voice_busy()){init_error=5;return false;}
     if(on&&!sstv_rx_init())return false;
 #ifdef FMO_SSTV_STREAMING
-    if(on&&!sstv_stream_prepare())return false;
+    if(on&&!sstv_stream_prepare()){init_error=6;return false;}
 #endif
     if(!atomic_load(&ready))return true;
     atomic_store(&enabled,false);atomic_fetch_add(&session,1);
@@ -261,7 +272,7 @@ bool sstv_rx_enable(bool on){
  sstv_stream_discard();portENTER_CRITICAL(&preview_mux);atomic_store(&ready,false);decoder=NULL;preview=NULL;portEXIT_CRITICAL(&preview_mux);sstv_workspace_release(SSTV_WORKSPACE_RX);
 #endif
     }
-    atomic_store(&enabled,on);xSemaphoreGive(lock);return true;
+    atomic_store(&enabled,on);if(on)init_error=0;xSemaphoreGive(lock);return true;
 }
 bool sstv_rx_save(uint32_t *id){
     if(!atomic_load(&ready)||!id||xSemaphoreTake(lock,pdMS_TO_TICKS(100))!=pdTRUE)return false;

@@ -31,9 +31,8 @@ static void sstv_rx_break(void){}
 #ifdef FMO_SSTV_STREAMING
 bool sstv_rx_enable(bool on){(void)on;return true;}
 static int decoder_storage;static void *decoder=&decoder_storage;
-static unsigned decoder_frees,decoder_restores;
+static unsigned decoder_frees;
 static void opus_decoder_destroy(void*p){assert(p==&decoder_storage);decoder_frees++;}
-static void *opus_decoder_create(int rate,int channels,int*error){assert(rate==8000&&channels==1);*error=0;decoder_restores++;return &decoder_storage;}
 #endif
 static void audio_stop(void){}
 static void notice(const char*s){(void)s;}
@@ -64,7 +63,7 @@ int main(void){int16_t pcm[640];uint8_t frames[656];voice_tx_t q={0};
  reset();q=(voice_tx_t){0};assert(voice_sstv_probe(1));send_sstv(1,connection_epoch,pcm,frames,&q);assert(!packets&&sstv_diag.generated==463&&sstv_diag.submitted==0&&!state.tx&&!strcmp(last_reason,"sstv_probe_complete"));
 
 #ifdef FMO_SSTV_STREAMING
-assert(decoder==&decoder_storage&&decoder_frees==decoder_restores&&decoder_frees>5);
+assert(!decoder&&decoder_frees==1);
 #endif
 puts("PASS actual SSTV TX: 463 timed packets, counter continuity, busy rejection, cancel, disconnect, congestion, missing/corrupt source");
 }

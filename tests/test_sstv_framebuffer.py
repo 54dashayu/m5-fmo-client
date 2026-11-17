@@ -19,11 +19,14 @@ static lv_color_t expected_pixel(unsigned x,unsigned y){unsigned v=native_pixel(
 static uint8_t*sstv_rx_pixels(void){return pixels;}
 static bool sstv_rx_preview_row(unsigned y,uint8_t*out){low_reads++;memcpy(out,pixels+y*SSTV_PREVIEW_WIDTH,SSTV_PREVIEW_WIDTH);return true;}
 static bool sstv_rx_preview_high_row(unsigned y,uint16_t*out){if(!high_count||y<high_first||y>=high_first+high_count)return false;sharp_reads++;for(unsigned x=0;x<240;x++)out[x]=native_pixel(x,y);return true;}
-static lv_obj_t *sstv_image,*title,*brand,*footer,*lines[5];static bool sstv_start_failed;static unsigned sstv_generation,sstv_lines,sstv_saved;static char image_notice[20];static sstv_status_t sstv_status;
+static lv_obj_t *sstv_image,*title,*brand,*footer,*lines[5];static bool sstv_start_failed;static unsigned sstv_generation,sstv_lines,sstv_saved,sstv_last_saved;static char image_notice[20];static sstv_status_t sstv_status;
 static void ensure_image(void){}
 static void image_changed(void){lv_obj_invalidate(sstv_image);}
 static bool sstv_rx_snapshot(sstv_status_t*s,unsigned*l,unsigned*g){(void)s;(void)l;(*g)++;return true;}
-static const char*sstv_store_error(void){return NULL;}
+static bool sstv_rx_start_busy(void){return true;}
+static bool voice_busy(void){return false;}
+static bool sstv_rx_enable(bool on){return on;}
+static const char*sstv_rx_start_error(void){return "waiting";}
 '''
 tail=r'''
 static lv_color_t frame[320*240];static unsigned flushes;

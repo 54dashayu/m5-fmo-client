@@ -90,6 +90,7 @@ static bool sstv_redraw_pending;
 static uint32_t sstv_saved;
 static char image_notice[112];
 static bool sstv_start_failed;
+static uint32_t sstv_last_saved;
 static sstv_entry_t gallery_entries[SSTV_GALLERY_MAX];
 static int gallery_count;
 static unsigned gallery_revision;
@@ -472,7 +473,7 @@ static void go(int next){if(page==SSTV
 #ifdef FMO_FULL_SSTV
  relay_t rx_relay={0};char context[128]="";relays_current(&rx_relay,NULL);if(rx_relay.uid)snprintf(context,sizeof(context),"%s / %lu",rx_relay.name[0]?rx_relay.name:rx_relay.call,(unsigned long)rx_relay.uid);sstv_rx_relay(context);
 #endif
- sstv_saved=0;image_notice[0]=0;sstv_status=SSTV_WAITING;sstv_lines=0;sstv_generation=~0u;if((sstv_start_failed=!sstv_rx_enable(true)))snprintf(image_notice,sizeof(image_notice),"%s",sstv_store_error()?sstv_store_error():sstv_store_save_error());ensure_image();}
+ sstv_saved=0;sstv_last_saved=0;image_notice[0]=0;sstv_status=SSTV_WAITING;sstv_lines=0;sstv_generation=~0u;if((sstv_start_failed=!sstv_rx_enable(true)))snprintf(image_notice,sizeof(image_notice),"%s",sstv_rx_start_error());ensure_image();}
  if(next==RESOURCES)gallery_space_valid=sstv_store_stats(&gallery_space);
  if(next==GALLERY){gallery_revision=sstv_store_revision();
 #ifdef FMO_SSTV_STREAMING
@@ -504,8 +505,8 @@ static void key(int k,key_action_t action,void*ctx){(void)ctx;ui_key_events++;ui
    else if(voice_busy())snprintf(image_notice,sizeof(image_notice),"通联中，请稍后保存");
    else if(sstv_status==SSTV_INTERRUPTED?sstv_rx_save_partial(&sstv_saved):sstv_rx_save(&sstv_saved)){
 #ifdef FMO_FULL_SSTV
-    /* Re-arm only after durable save succeeds; failure retains the completed image. */
-    go(SSTV);
+    /* A saved image stays successful even if re-arming is temporarily busy. */
+    uint32_t saved_id=sstv_saved;go(SSTV);sstv_last_saved=saved_id;
 #else
     snprintf(image_notice,sizeof(image_notice),"已保存 #%lu",(unsigned long)sstv_saved);
 #endif
@@ -593,6 +594,10 @@ static void refresh(void){
 #ifndef FMO_SSTV_STREAMING
   lv_label_set_text(title,"SSTV / Robot36");lv_label_set_text_fmt(brand,"当前中继：%s / %lu",relay.call,(unsigned long)relay.uid);
 #endif
+  if(sstv_start_failed&&sstv_rx_start_busy()&&!voice_busy()){
+   sstv_start_failed=!sstv_rx_enable(true);
+   snprintf(image_notice,sizeof(image_notice),"%s",sstv_start_failed?sstv_rx_start_error():"");
+  }
   unsigned before=sstv_generation;
   if(!sstv_start_failed&&sstv_rx_snapshot(&sstv_status,&sstv_lines,&sstv_generation)){
    ensure_image();if(sstv_image&&lv_obj_has_flag(sstv_image,LV_OBJ_FLAG_HIDDEN))lv_obj_clear_flag(sstv_image,LV_OBJ_FLAG_HIDDEN);
@@ -604,7 +609,10 @@ static void refresh(void){
 #endif
     sstv_redraw_pending=false;if(!sstv_saved)image_notice[0]=0;}
   }
-  if(sstv_start_failed)lv_label_set_text(lines[0],sstv_store_error()?"相册未就绪，请在网页处理":image_notice);
+  if(sstv_status==SSTV_RECEIVING)sstv_last_saved=0;
+  if(sstv_start_failed&&sstv_last_saved)lv_label_set_text_fmt(lines[0],"已保存 #%lu；%s",(unsigned long)sstv_last_saved,sstv_rx_start_error());
+  else if(sstv_start_failed)lv_label_set_text(lines[0],sstv_rx_start_error());
+  else if(sstv_last_saved)lv_label_set_text_fmt(lines[0],"已保存 #%lu，等待信号",(unsigned long)sstv_last_saved);
   else if(image_notice[0])lv_label_set_text(lines[0],image_notice);
 #ifdef FMO_FULL_SSTV
   else if(sstv_status==SSTV_RECEIVING)lv_label_set_text_fmt(lines[0],"接收中 %u/240",sstv_lines);
