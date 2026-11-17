@@ -17,8 +17,8 @@ async function scenario(id,{install=false,mismatch=false,incompatible=false,canc
  async function fixtures(board){const b=BOARDS[board],base=board+'/v0.7.30/';manifest={version:'0.7.30',board,chip:b.chip,flashSize:b.flashSize,download:base+'fmo-'+board+'-v0.7.30.zip',parts:[]};files={};for(let i=0;i<b.addresses.length;i++){const buf=b.addresses[i]===0x8000?table(board):new Uint8Array([i,2,3]);const path=base+b.names[i];files[path]=buf;manifest.parts.push({address:b.addresses[i],path,sha256:Buffer.from(await webcrypto.subtle.digest('SHA-256',buf)).toString('hex')})}}
  await fixtures('m5-fire');
  class Transport{async setDTR(v){signals.push(['D',v])}async setRTS(v){signals.push(['R',v])}async disconnect(){}}
- class ESPLoader{constructor(){this.chip={CHIP_NAME:mismatch?'ESP32-C3':selectedChip}}async main(){}async detectFlashSize(){return smallFlash?'4MB':'16MB'}async readFlash(){const buf=table(id,migrate);if(incompatible)new DataView(buf.buffer).setUint32(8,1,true);return buf}async writeFlash(opts){writes.push(opts)}}
- const context=vm.createContext({BOARDS,LAYOUTS,partitionPlan,validateManifest,validPartitions,selectedParts,ESPLoader,Transport,md5:()=>'',isSecureContext:true,navigator:{serial:{requestPort:async()=>({})}},document:{getElementById:el,querySelector:()=>input,querySelectorAll:()=>[el('hardware'),el('installConfirm'),el('boardSelect')]},window:{addEventListener(){}},crypto:webcrypto,AbortSignal,Uint8Array,DataView,setTimeout:(f)=>setTimeout(f,0),fetch:async url=>url.includes('manifest.json')?{ok:true,json:async()=>manifest}:{ok:true,arrayBuffer:async()=>files[url.replace('firmware/','')].buffer}});
+ class ESPLoader{constructor(options){assert.equal(options.serialOptions.bufferSize,65536);this.chip={CHIP_NAME:mismatch?'ESP32-C3':selectedChip}}async main(){}async detectFlashSize(){return smallFlash?'4MB':'16MB'}async readFlash(){const buf=table(id,migrate);if(incompatible)new DataView(buf.buffer).setUint32(8,1,true);return buf}async writeFlash(opts){writes.push(opts)}}
+ const context=vm.createContext({BOARDS,LAYOUTS,partitionPlan,validateManifest,validPartitions,selectedParts,ESPLoader,Transport,readPartitionTable:loader=>loader.readFlash(),md5:()=>'',isSecureContext:true,navigator:{serial:{requestPort:async()=>({})}},document:{getElementById:el,querySelector:()=>input,querySelectorAll:()=>[el('hardware'),el('installConfirm'),el('boardSelect')]},window:{addEventListener(){}},crypto:webcrypto,AbortSignal,Uint8Array,DataView,setTimeout:(f)=>setTimeout(f,0),fetch:async url=>url.includes('manifest.json')?{ok:true,json:async()=>manifest}:{ok:true,arrayBuffer:async()=>files[url.replace('firmware/','')].buffer}});
  vm.runInContext(source,context);await new Promise(r=>setTimeout(r,5));
  await fixtures(id);el('boardSelect').value=id;el('hardware').checked=true;await el('boardSelect').listeners.change();await new Promise(r=>setTimeout(r,5));assert.equal(el('hardware').checked,false);el('hardware').checked=true;el('installConfirm').checked=install;
  await el('flash').listeners.click();assert.equal(writes.length,0,'preparation must not write');
@@ -29,3 +29,19 @@ async function scenario(id,{install=false,mismatch=false,incompatible=false,canc
 }
 for(const id of Object.keys(BOARDS)){for(const options of [{},{install:true},{cancel:true},{mismatch:true},{incompatible:true},{migrate:true},{smallFlash:true}])await scenario(id,options)}
 console.log('PASS real flasher flow: both boards, app-only upgrade, initial layout, pre-confirm no writes, cancellation, chip/partition refusal and reset pulse');
+
+// Exercise the actual read protocol, including the trailing digest and failures.
+const {readPartitionTable}=await import('../web-flasher/partition-reader.mjs');
+for(const failure of [null,'digest','short','timeout','not-stub']) {
+ const bytes=table('xingzhi-cube-1.54tft-wifi'),acks=[],progress=[];
+ let packet=0,commands=0;
+ const loader={IS_STUB:failure!=='not-stub',ESP_READ_FLASH:0xd2,
+  async checkCommand(label,op,payload,checksum,responseLength,timeout){
+   commands++;assert.equal(op,0xd2);assert.equal(timeout,5000);
+   assert.deepEqual(Array.from(new Uint32Array(payload.buffer)),[0x8000,4096,1024,1]);return 0;
+  },transport:{async read(timeout){assert.equal(timeout,5000);if(failure==='timeout')throw Error('read timeout');if(failure==='short')return new Uint8Array(1);if(packet<4)return bytes.slice(packet++*1024,packet*1024);packet++;return new Uint8Array(Buffer.from(failure==='digest'?'00'.repeat(16):realHash(bytes),'hex'));},async write(ack){acks.push(new DataView(ack.buffer).getUint32(0,true));}}};
+ const read=()=>readPartitionTable(loader,realHash,(n)=>progress.push(n));
+ if(failure)await assert.rejects(read);else {assert.deepEqual(await read(),bytes);assert.deepEqual(acks,[1024,2048,3072,4096]);assert.deepEqual(progress,[0,1024,2048,3072,4096]);assert.equal(packet,5);}
+ if(failure==='not-stub')assert.equal(commands,0);
+}
+console.log('PASS bounded partition read: packet ACKs, digest, progress, corruption and timeout refusal');
