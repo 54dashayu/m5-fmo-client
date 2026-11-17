@@ -91,6 +91,26 @@ static uint32_t sstv_saved;
 static char image_notice[112];
 static bool sstv_start_failed;
 static uint32_t sstv_last_saved;
+#ifdef CONFIG_FMO_BOARD_XINGZHI
+/* Publish the result only after the worker has finished touching the RX image. */
+static atomic_int sstv_save_work;
+static bool sstv_save_partial_job,sstv_save_ok;
+static uint32_t sstv_save_id;
+static char sstv_save_message[112];
+static void sstv_save_task(void *arg){
+ (void)arg;sstv_save_id=0;
+ sstv_save_ok=sstv_save_partial_job?sstv_rx_save_partial(&sstv_save_id):sstv_rx_save(&sstv_save_id);
+ snprintf(sstv_save_message,sizeof(sstv_save_message),"%s",sstv_save_ok?"":sstv_store_error()?sstv_store_error():"保存未完成，请稍后重试");
+ atomic_store(&sstv_save_work,2);vTaskDelete(NULL);
+}
+static void sstv_save_begin(void){
+ sstv_save_partial_job=sstv_status==SSTV_INTERRUPTED;
+ atomic_store(&sstv_save_work,1);
+ if(xTaskCreate(sstv_save_task,"sstv_save",6144,NULL,2,NULL)!=pdPASS){
+  atomic_store(&sstv_save_work,0);snprintf(image_notice,sizeof(image_notice),"保存任务未启动，请稍后重试");
+ }
+}
+#endif
 static sstv_entry_t gallery_entries[SSTV_GALLERY_MAX];
 static int gallery_count;
 static unsigned gallery_revision;
@@ -491,6 +511,9 @@ static void key(int k,key_action_t action,void*ctx){(void)ctx;ui_key_events++;ui
  #ifdef FMO_SSTV_STREAMING
  if(page==GALLERY&&atomic_load(&gallery_work))return;
 #endif
+#ifdef CONFIG_FMO_BOARD_XINGZHI
+ if(page==SSTV&&atomic_load(&sstv_save_work))return;
+#endif
  if(action==KEY_PTT_START){if(page==HOME)voice_ptt(true);return;}
  if(page==KEY_LAYOUT){if(action==KEY_LONG&&k==0){go(HOME);return;}if(action==KEY_SHORT){if(k==0)selection=(selection+KEY_LAYOUT_COUNT-1)%KEY_LAYOUT_COUNT;if(k==2)selection=(selection+1)%KEY_LAYOUT_COUNT;if(k==1){voice_ptt(false);if(save_key_layout(selection)){go(HOME);create_ui();}}}return;}
  if(action==KEY_LONG){if(page==HOME){if(k==0)go(MEDIA);if(k==1)voice_ptt(false);if(k==2)go(MENU);}else if(k==0)go(HOME);return;}
@@ -503,6 +526,9 @@ static void key(int k,key_action_t action,void*ctx){(void)ctx;ui_key_events++;ui
   if(k==1&&!sstv_saved){
    if(sstv_status!=SSTV_COMPLETE&&(sstv_status!=SSTV_INTERRUPTED||sstv_lines<2))snprintf(image_notice,sizeof(image_notice),"尚无可保存的图像");
    else if(voice_busy())snprintf(image_notice,sizeof(image_notice),"通联中，请稍后保存");
+#ifdef CONFIG_FMO_BOARD_XINGZHI
+   else sstv_save_begin();
+#else
    else if(sstv_status==SSTV_INTERRUPTED?sstv_rx_save_partial(&sstv_saved):sstv_rx_save(&sstv_saved)){
 #ifdef FMO_FULL_SSTV
     /* A saved image stays successful even if re-arming is temporarily busy. */
@@ -512,6 +538,7 @@ static void key(int k,key_action_t action,void*ctx){(void)ctx;ui_key_events++;ui
 #endif
    }
    else snprintf(image_notice,sizeof(image_notice),"%s",sstv_store_error()?sstv_store_error():sstv_store_save_error());
+#endif
   }return;
  }
  if(page==SSTV_TX_CONFIRM){if(gallery_revision!=sstv_store_revision()){go(GALLERY);return;}if(k==1){go(SSTV_TX_PAGE);tx_launch_failed=!voice_sstv_start(tx_image_id);}else go(GALLERY);return;}
@@ -549,6 +576,13 @@ static void refresh_sstv_tx(void){
 
 }
 static void refresh(void){
+#ifdef CONFIG_FMO_BOARD_XINGZHI
+ if(page==SSTV&&atomic_load(&sstv_save_work)==2){
+  atomic_store(&sstv_save_work,0);buttons_block(&keys);
+  if(sstv_save_ok){uint32_t id=sstv_save_id;go(SSTV);sstv_last_saved=id;}
+  else snprintf(image_notice,sizeof(image_notice),"%s",sstv_save_message);
+ }
+#endif
 #ifdef FMO_SSTV_STREAMING
  if(page==GALLERY&&atomic_load(&gallery_work)==3){atomic_store(&gallery_work,0);buttons_block(&keys);ensure_image();image_changed();}
 #endif
@@ -591,6 +625,12 @@ static void refresh(void){
   for(int i=0;i<4;i++){lv_label_set_text_fmt(lines[i],"%s %s",selection==i?">":" ",choices[i]);}
   lv_label_set_text(footer,"A 上项  B 确认  C 下项");
  }else if(page==SSTV){
+#ifdef CONFIG_FMO_BOARD_XINGZHI
+  if(atomic_load(&sstv_save_work)==1){
+   lv_label_set_text(lines[0],"正在保存，请稍候…");
+   lv_label_set_text(footer,"保存中，请勿重复按键");return;
+  }
+#endif
 #ifndef FMO_SSTV_STREAMING
   lv_label_set_text(title,"SSTV / Robot36");lv_label_set_text_fmt(brand,"当前中继：%s / %lu",relay.call,(unsigned long)relay.uid);
 #endif

@@ -7,7 +7,7 @@
 #ifdef CONFIG_FMO_BOARD_XINGZHI
 #include "fmo_profile.h"
 #define FMO_BOARD_TITLE "FMO / S3"
-#define FMO_VERSION "0.7.77"
+#define FMO_VERSION "0.7.78"
 #define FMO_HAS_SIDE_LEDS 0
 
 #else

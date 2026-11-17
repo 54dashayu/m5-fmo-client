@@ -35,6 +35,9 @@ static void gallery_load(void){loads++;}
 static bool voice_busy(void){return busy;}
 static bool sstv_rx_save(uint32_t*i){saves++;if(save_ok)*i=42;return save_ok;}
 static bool sstv_rx_save_partial(uint32_t*i){saves++;*i=43;return true;}
+#ifdef CONFIG_FMO_BOARD_XINGZHI
+static void sstv_save_begin(void){if(sstv_status==SSTV_INTERRUPTED?sstv_rx_save_partial(&sstv_saved):sstv_rx_save(&sstv_saved)){uint32_t id=sstv_saved;go(SSTV);sstv_last_saved=id;}}
+#endif
 const char*sstv_store_error(void){return NULL;}
 const char*sstv_store_save_error(void){return "保存失败：相册已满或存储忙";}
 '''
