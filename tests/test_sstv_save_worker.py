@@ -25,7 +25,8 @@ static const char*sstv_store_error(void){return NULL;}
 tail=r'''
 int main(void){
 key();assert(creates==1&&writes==0&&atomic_load(&sstv_save_work)==1);
-for(int i=0;i<20;i++)key();assert(creates==1&&writes==0);
+for(int i=0;i<20;i++){key();}
+assert(creates==1&&writes==0);
 pending(NULL);assert(writes==1&&sstv_save_ok&&sstv_save_id==42&&atomic_load(&sstv_save_work)==2);
 key();assert(creates==1);atomic_store(&sstv_save_work,0);
 save_ok=false;key();pending(NULL);assert(!sstv_save_ok&&sstv_save_id==0);assert(!strstr(sstv_save_message,"相册已满"));atomic_store(&sstv_save_work,0);
