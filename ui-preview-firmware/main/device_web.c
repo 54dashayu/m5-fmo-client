@@ -8,6 +8,9 @@
 #include "sstv_rx.h"
 #include <stdbool.h>
 #include "board.h"
+#ifdef CONFIG_FMO_BOARD_CYD28_PLUS
+#include "boards/cyd28_plus/remote_probe.h"
+#endif
 #include "auto_ca_policy.h"
 #ifdef CONFIG_FMO_BOARD_XINGZHI
 #include "driver/usb_serial_jtag.h"
@@ -227,6 +230,10 @@ static esp_err_t login_page(request_t*r){static int64_t next=0;int64_t now=esp_t
 extern unsigned ui_key_events;extern int ui_last_key,ui_last_action;
 // The browser polls only presentation fields; full diagnostics remain on USB.
 static void board_configuration(cJSON*j){
+ cJSON_AddBoolToObject(j,"hasMicrophone",FMO_HAS_MIC);cJSON_AddBoolToObject(j,"hasTouch",FMO_HAS_TOUCH);cJSON_AddBoolToObject(j,"hasTf",FMO_HAS_TF);
+#ifdef CONFIG_FMO_BOARD_CYD28_PLUS
+ cJSON_AddStringToObject(j,"screenModel","ST7789 / XPT2046");cJSON_AddNumberToObject(j,"screenWidth",320);cJSON_AddNumberToObject(j,"screenHeight",240);cJSON_AddBoolToObject(j,"sstvTransmitEnabled",false);
+#endif
  (void)j;
 #ifdef CONFIG_FMO_BOARD_XINGZHI
  cJSON_AddStringToObject(j,"boardProfile",FMO_PROFILE_HASH);cJSON_AddStringToObject(j,"screenModel",FMO_SCREEN_MODEL);cJSON_AddNumberToObject(j,"screenWidth",FMO_WIDTH);cJSON_AddNumberToObject(j,"screenHeight",FMO_HEIGHT);
@@ -574,6 +581,13 @@ static esp_err_t gallery_storage(request_t*r,const char *op){
  return err?fail(r,err):success(r,"存储操作完成，请刷新相册");
 }
 static esp_err_t dispatch(request_t*r,const char*op){
+#ifdef CONFIG_FMO_BOARD_CYD28_PLUS
+ if(r->usb&&!strcmp(op,"audio_probe_status")){if(!auth(r))return ESP_OK;cJSON*j=cJSON_CreateObject();cJSON_AddNumberToObject(j,"phase",cyd_remote_probe_status());return response(r,j);}
+ if(r->usb&&(!strcmp(op,"audio_probe")||!strcmp(op,"audio_probe_pcm"))){if(!auth(r))return ESP_OK;cJSON*j=body(r);cJSON*v=cJSON_GetObjectItemCaseSensitive(j,"backlight");int light=cJSON_IsNumber(v)&&v->valuedouble>=0&&v->valuedouble<=2&&v->valuedouble==(int)v->valuedouble?v->valueint:-1;cJSON_Delete(j);return (!strcmp(op,"audio_probe_pcm")?cyd_remote_pcm_probe_request(light):cyd_remote_probe_request(light))?success(r,"已排队：背光对照与本地测试音"):fail(r,"参数无效、静音或音频忙");}
+#endif
+
+ if(!strcmp(op,"management_code")&&r->usb){cJSON*j=cJSON_CreateObject();cJSON_AddStringToObject(j,"code",code);return response(r,j);}
+
  if(!strcmp(op,"audio_diagnostics")&&r->usb){
   if(!auth(r))return ESP_OK;
   voice_view_t v;voice_view(&v);cJSON*j=cJSON_CreateObject();
@@ -581,7 +595,7 @@ static esp_err_t dispatch(request_t*r,const char*op){
   AUDIO_FIELD(rx_packets);AUDIO_FIELD(rx_frames_received);AUDIO_FIELD(rx_wire_gap_us_max);AUDIO_FIELD(rx_age_us_max);AUDIO_FIELD(rx_queue_peak_bytes);
   AUDIO_FIELD(rx_overflow);AUDIO_FIELD(rx_late);AUDIO_FIELD(rx_rejected);AUDIO_FIELD(rx_oversized);AUDIO_FIELD(rx_underflows);AUDIO_FIELD(rx_rebuffers);AUDIO_FIELD(rx_duplicates);
   AUDIO_FIELD(decoded_frames);AUDIO_FIELD(decoded_samples);AUDIO_FIELD(decode_errors);AUDIO_FIELD(decode_us_max);AUDIO_FIELD(decode_slow_frames);AUDIO_FIELD(last_codec);
-  AUDIO_FIELD(play_gap_us_max);AUDIO_FIELD(play_late_feeds);AUDIO_FIELD(pcm_samples_written);AUDIO_FIELD(output_errors);AUDIO_FIELD(dac_rate);AUDIO_FIELD(dma_rate);
+  AUDIO_FIELD(play_gap_us_max);AUDIO_FIELD(play_late_feeds);AUDIO_FIELD(pcm_samples_written);AUDIO_FIELD(output_errors);AUDIO_FIELD(dac_dma_stops);AUDIO_FIELD(dac_rate);AUDIO_FIELD(dma_rate);
 #undef AUDIO_FIELD
 
 #ifndef CONFIG_FMO_BOARD_XINGZHI

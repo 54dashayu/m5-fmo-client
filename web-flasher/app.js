@@ -38,7 +38,7 @@ async function refreshVersion(){
  finally{refreshing=false;update();}
 }
 $('refreshVersion').addEventListener('click',()=>refreshVersion().catch(()=>{}));
-$('copyLog').addEventListener('click',async()=>{try{await navigator.clipboard.writeText('网页版本：20261117.8\n'+$('versionStatus').textContent+'\n'+$('log').textContent);$('copyLog').textContent='已复制日志';}catch{$('copyLog').textContent='复制失败，请选择日志文字复制';}});
+$('copyLog').addEventListener('click',async()=>{try{await navigator.clipboard.writeText('网页版本：20261123.1\n'+$('versionStatus').textContent+'\n'+$('log').textContent);$('copyLog').textContent='已复制日志';}catch{$('copyLog').textContent='复制失败，请选择日志文字复制';}});
 function changeBoard(){boardId=$('boardSelect').value;const b=BOARDS[boardId];$('hardware').checked=false;$('installConfirm').checked=false;$('hardwareDetails').textContent=b.hardware;$('selectedPhoto').src=b.photo;$('selectedPhoto').alt=b.name+' 实机照片';$('boardIntro').textContent=b.name;$('status').textContent='等待选择设备';refreshVersion().catch(()=>{});}
 $('boardSelect').addEventListener('change',changeBoard);changeBoard();
 // Original ESP32 + USB UART: keep GPIO0 released and pulse EN through RTS.
@@ -60,11 +60,11 @@ $('flash').addEventListener('click',async()=>{
  const install=document.querySelector('input[name=mode]:checked').value==='install';
  const port=await navigator.serial.requestPort();
  const {ESPLoader,Transport,md5}=await loadFlashTools();
- status('下载并校验固件…');const manifest=await refreshVersion();log('固件 v'+manifest.version+' · 网页 20261117.8 · 波特率 115200');const board=BOARDS[boardId];const parts=selectedParts(manifest,install);
+ status('下载并校验固件…');const manifest=await refreshVersion();log('固件 v'+manifest.version+' · 网页 20261123.1 · 波特率 115200');const board=BOARDS[boardId];const parts=selectedParts(manifest,install);
  const expected=install?board.addresses:[board.app];if(JSON.stringify(parts.map(p=>p.address))!==JSON.stringify(expected))throw Error('固件清单分区不符合预期');
  const files=await Promise.all(parts.map(async p=>({address:p.address,data:await binary(p)})));
  const transport=new Transport(port,false);const loader=new ESPLoader({transport,baudrate:115200,serialOptions:{bufferSize:65536},terminal:{clean(){},write:log,writeLine:log},debugLogging:false});session={transport,loader,files,boardId,md5,ready:false};status('正在连接 '+board.name+'…');await loader.main();if(loader.chip.CHIP_NAME!==board.chip)throw Error('芯片与所选硬件不符，已停止，未写入');
- const detected=await loader.detectFlashSize();if(!detected||!/^\d+MB$/.test(detected)||parseInt(detected,10)<16)throw Error('本版需要至少 16MB Flash，检测到 '+(detected||'未知容量')+'，未写入');
+ const detected=await loader.detectFlashSize();if(!detected||!/^\d+MB$/.test(detected)||(boardId==='esp32-2432s028r-plus'?detected!==board.flashSize:parseInt(detected,10)<parseInt(board.flashSize,10)))throw Error('所选板型要求 '+board.flashSize+' Flash，检测到 '+(detected||'未知容量')+'，未写入');
  let migrated=false;
  if(!install){status('检查现有分区…');const plan=partitionPlan(await readPartitionTable(loader,md5,(received,total)=>status('检查现有分区：'+received+' / '+total+' 字节（尚未写入）')),boardId);if(!plan)throw Error('分区不兼容，未写入。请备份并核对原固件布局。');if(plan==='migrate'){const table=manifest.parts.find(p=>p.address===0x8000);const data=await binary(table);if(partitionPlan(data,boardId)!=='current')throw Error('新相册分区校验失败，未写入');if(boardId==='m5-fire'){const boot=manifest.parts.find(p=>p.address===0x1000);files.push({address:boot.address,data:await binary(boot)});}files.push({address:0x8000,data});migrated=true;}}
 

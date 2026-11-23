@@ -6,6 +6,9 @@
 #include "key_layout.h"
 #include "screen_sleep.h"
 #include "board.h"
+#ifdef CONFIG_FMO_BOARD_CYD28_PLUS
+#include "cyd28_plus_touch.h"
+#endif
 #include "nvs.h"
 #ifdef CONFIG_FMO_BOARD_XINGZHI
 #include "driver/rtc_io.h"
@@ -31,6 +34,9 @@ extern const lv_font_t font20, history_font, status_font, ui_small, ui_call, ui_
 #include "fonts/coverage.h"
 #include "buttons.h"
 #include "voice.h"
+#ifdef CONFIG_FMO_BOARD_CYD28_PLUS
+#include "boards/cyd28_plus/remote_probe.inc"
+#endif
 #include "sstv_rx.h"
 #include "sstv_store.h"
 #include "battery.h"
@@ -115,6 +121,9 @@ static sstv_entry_t gallery_entries[SSTV_GALLERY_MAX];
 static int gallery_count;
 static unsigned gallery_revision;
 static bool gallery_preview_ready;
+#ifdef CONFIG_FMO_BOARD_CYD28_PLUS
+static bool gallery_zoom;
+#endif
 static uint32_t tx_image_id;static bool tx_launch_failed;
 #ifdef FMO_FULL_SSTV
 static sstv_storage_t gallery_space;static bool gallery_space_valid;
@@ -175,6 +184,9 @@ static void image_draw(lv_event_t *event){
    if(sharp){unsigned v=high_row[x];row[x]=lv_color_make(((v>>11)&31)*255/31,((v>>5)&63)*255/63,(v&31)*255/31);continue;}
    if(page!=GALLERY){uint8_t v=rx_row[x*SSTV_PREVIEW_WIDTH/240];row[x]=lv_color_make((v>>5)*255/7,((v>>2)&7)*255/7,(v&3)*255/3);continue;}
    row[x]=lv_color_make(13,21,29);
+#ifdef CONFIG_FMO_BOARD_CYD28_PLUS
+   if(gallery_zoom){if(x>=40&&x<280){uint8_t v=gallery_pixels[(y/3)*80+(x-40)/3];row[x]=lv_color_make((v>>5)*255/7,((v>>2)&7)*255/7,(v&3)*255/3);}continue;}
+#endif
    if(x>=98&&x<222&&y>=43&&y<137&&(x<100||x>=220||y<45||y>=135)){row[x]=lv_color_make(88,214,178);continue;}
    const uint8_t *src=NULL;unsigned at=0;
    if(x>=100&&x<220&&y>=45&&y<135){src=gallery_pixels;at=((y-45)*60/90)*80+(x-100)*80/120;}
@@ -300,9 +312,25 @@ static char held_call[16];
 #ifdef FMO_FULL_SSTV
 static lv_obj_t *call_card;
 #endif
-static const char*items[]={"选择中继","音量与静音","设备身份","网页管理","扬声器测试","麦克风测试","显示与按键","按键分配方案",
+static const char*items[]={"选择中继","音量与静音","设备身份","网页管理","扬声器测试",
+#ifdef CONFIG_FMO_BOARD_CYD28_PLUS
+"麦克风测试"
+#else
+"麦克风测试"
+#endif
+,
+#ifdef CONFIG_FMO_BOARD_CYD28_PLUS
+"Touch calibration","SSTV RX",
+#else
+"显示与按键","按键分配方案",
+#endif
+
 #ifdef FMO_FULL_SSTV
+#ifdef CONFIG_FMO_BOARD_CYD28_PLUS
+"SSTV相册",
+#else
 "内存与存储",
+#endif
 #endif
 "返回通联"};
 static void set_text(lv_obj_t*o,const char*s){
@@ -489,6 +517,9 @@ static void go(int next){if(page==SSTV
  if(page==GALLERY&&next!=GALLERY)sstv_workspace_release(SSTV_WORKSPACE_GALLERY);
 #endif
  voice_ptt(false);voice_mic_test(false);page=next;
+#ifdef CONFIG_FMO_BOARD_CYD28_PLUS
+ gallery_zoom=false;
+#endif
  if(next==SSTV){
 #ifdef FMO_FULL_SSTV
  relay_t rx_relay={0};char context[128]="";relays_current(&rx_relay,NULL);if(rx_relay.uid)snprintf(context,sizeof(context),"%s / %lu",rx_relay.name[0]?rx_relay.name:rx_relay.call,(unsigned long)rx_relay.uid);sstv_rx_relay(context);
@@ -544,17 +575,38 @@ static void key(int k,key_action_t action,void*ctx){(void)ctx;ui_key_events++;ui
  if(page==SSTV_TX_CONFIRM){if(gallery_revision!=sstv_store_revision()){go(GALLERY);return;}if(k==1){go(SSTV_TX_PAGE);tx_launch_failed=!voice_sstv_start(tx_image_id);}else go(GALLERY);return;}
  if(page==SSTV_TX_PAGE){if(k==1)voice_sstv_stop();else{voice_sstv_stop();go(GALLERY);}return;}
 #ifdef FMO_SSTV_STREAMING
- if(page==GALLERY){if(gallery_revision!=sstv_store_revision()){go(GALLERY);return;}if(k==1){if(gallery_count>0&&gallery_preview_ready){tx_image_id=gallery_entries[selection].id;go(SSTV_TX_CONFIRM);}else if(gallery_count<=0)go(MEDIA);return;}gallery_request(k==0?-1:1);return;}
+ if(page==GALLERY){
+#ifdef CONFIG_FMO_BOARD_CYD28_PLUS
+ if(k==1){go(HOME);return;}
+#endif
+ if(gallery_revision!=sstv_store_revision()){go(GALLERY);return;}if(k==1){if(gallery_count>0&&gallery_preview_ready){tx_image_id=gallery_entries[selection].id;go(SSTV_TX_CONFIRM);}else if(gallery_count<=0)go(MEDIA);return;}gallery_request(k==0?-1:1);return;}
 #else
- if(page==GALLERY){if(gallery_revision!=sstv_store_revision()){go(GALLERY);return;}if(k==1){if(gallery_count>0&&gallery_preview_ready){tx_image_id=gallery_entries[selection].id;go(SSTV_TX_CONFIRM);}else go(MEDIA);return;}if(gallery_count>0){if(k==0){if(selection)selection--;else{int n=sstv_store_newer(gallery_entries,gallery_entries[0].id);if(!n)n=sstv_store_newer(gallery_entries,0);gallery_count=n;selection=n>0?n-1:0;}}if(k==2){if(selection+1<gallery_count)selection++;else{int n=sstv_store_page(gallery_entries,gallery_entries[gallery_count-1].id);if(!n)n=sstv_store_list(gallery_entries);gallery_count=n;selection=0;}}gallery_load();}return;}
+ if(page==GALLERY){
+#ifdef CONFIG_FMO_BOARD_CYD28_PLUS
+ if(k==1){go(HOME);return;}
+#endif
+ if(gallery_revision!=sstv_store_revision()){go(GALLERY);return;}if(k==1){if(gallery_count>0&&gallery_preview_ready){tx_image_id=gallery_entries[selection].id;go(SSTV_TX_CONFIRM);}else go(MEDIA);return;}if(gallery_count>0){if(k==0){if(selection)selection--;else{int n=sstv_store_newer(gallery_entries,gallery_entries[0].id);if(!n)n=sstv_store_newer(gallery_entries,0);gallery_count=n;selection=n>0?n-1:0;}}if(k==2){if(selection+1<gallery_count)selection++;else{int n=sstv_store_page(gallery_entries,gallery_entries[gallery_count-1].id);if(!n)n=sstv_store_list(gallery_entries);gallery_count=n;selection=0;}}gallery_load();}return;}
 #endif
  if(page==RESOURCES){if(k==1)go(MENU);else selection=1-selection;return;}
- if(page==MENU){if(k==0)selection=(selection+sizeof(items)/sizeof(items[0])-1)%(sizeof(items)/sizeof(items[0]));if(k==2)selection=(selection+1)%(sizeof(items)/sizeof(items[0]));if(k==1){int target=selection;if(target==0)go(RELAYS);else if(target==1)go(VOLUME);else if(target==2)go(IDENTITY);else if(target==3)go(WEB);else if(target==4)voice_tone();else if(target==5)go(MIC);else if(target==6)go(SETTINGS);else if(target==7)go(KEY_LAYOUT);
+ if(page==MENU){if(k==0)selection=(selection+sizeof(items)/sizeof(items[0])-1)%(sizeof(items)/sizeof(items[0]));if(k==2)selection=(selection+1)%(sizeof(items)/sizeof(items[0]));if(k==1){int target=selection;if(target==0)go(RELAYS);else if(target==1)go(VOLUME);else if(target==2)go(IDENTITY);else if(target==3)go(WEB);else if(target==4)voice_tone();else if(target==5){if(FMO_HAS_MIC)go(MIC);
+#ifdef CONFIG_FMO_BOARD_CYD28_PLUS
+ else cyd_touch_recalibrate();
+#endif
+}else if(target==6){
+#ifdef CONFIG_FMO_BOARD_CYD28_PLUS
+ cyd_touch_recalibrate();
+#else
+ go(SETTINGS);
+#endif
+}else if(target==7){if(FMO_HAS_TOUCH)go(SSTV);else go(KEY_LAYOUT);}
 #ifdef FMO_FULL_SSTV
-else if(target==8)go(RESOURCES);
+else if(target==8)go(FMO_HAS_TOUCH?GALLERY:RESOURCES);
 #endif
 else go(HOME);}return;}
  if(page==SETTINGS){
+#ifdef CONFIG_FMO_BOARD_CYD28_PLUS
+ go(HOME);return;
+#endif
  if(k==0){selection=(selection+2)%3;}if(k==2)selection=(selection+1)%3;
  if(k==1){voice_ptt(false);if(selection==0){if(save_settings((rotation+1)%4,breathing,ptt_latch)){lv_disp_set_rotation(NULL,(lv_disp_rot_t)rotation);create_ui();}}
  else if(selection==1){if(FMO_HAS_SIDE_LEDS)save_settings(rotation,!breathing,ptt_latch);else snprintf(settings_notice,sizeof(settings_notice),"本机无灯条，使用呼号闪烁");}
@@ -725,7 +777,7 @@ static void refresh(void){
  if(gallery_space_valid){
  snprintf(metric_text,sizeof(metric_text),"相册已用 %.1f%%",gallery_space.total?100.0*gallery_space.used/gallery_space.total:0);lv_label_set_text(lines[0],metric_text);
  lv_label_set_text_fmt(lines[1],"已用 %u / %u KB",(unsigned)((gallery_space.used+1023)/1024),(unsigned)(gallery_space.total/1024));
- lv_label_set_text_fmt(lines[2],"已存 %u 张 / 最多20张",gallery_space.count);
+ if(FMO_HAS_TOUCH)lv_label_set_text_fmt(lines[2],"已存 %u 张",gallery_space.count);else lv_label_set_text_fmt(lines[2],"已存 %u 张 / 最多20张",gallery_space.count);
  lv_label_set_text_fmt(lines[3],"预计还能存约 %u 张",gallery_space.remaining);
  }else{lv_label_set_text(lines[0],"相册暂时无法读取");for(int i=1;i<4;i++)lv_label_set_text(lines[i],"");}
  lv_label_set_text(lines[4],"请及时导出并删除旧图");}
@@ -775,20 +827,81 @@ static void create_ui(void){
  footer=label("正在启动",12,220,&status_font,0x70d5ae);lv_label_set_long_mode(footer,LV_LABEL_LONG_SCROLL_CIRCULAR);lv_label_set_long_mode(brand,LV_LABEL_LONG_DOT);
  build_home();
 }
+
+#ifdef CONFIG_FMO_BOARD_CYD28_PLUS
+static int cyd_content_rows(void){
+ int total=0,start=0,per=4;
+ if(page==MENU){total=sizeof(items)/sizeof(items[0]);per=5;start=selection/per*per;}
+ else if(page==RELAYS){total=relays_count()+1;start=relays_order_position(selection)/per*per;}
+ else if(page==DISCOVER){total=discovered_count+1;start=selection/per*per;}
+ else return 0;
+ int n=total-start;return n<per?n:per;
+}
+static int cyd_content_kind(void){return page==HOME?CYD_CONTENT_HOME:cyd_content_rows()?CYD_CONTENT_LIST:page==GALLERY?(gallery_zoom?CYD_CONTENT_ZOOM:CYD_CONTENT_GALLERY):CYD_CONTENT_NONE;}
+static void cyd_activate(int target){
+ if(page==GALLERY&&atomic_load(&gallery_work))return;
+ if(target==3){if(page==GALLERY&&gallery_zoom){gallery_zoom=false;image_changed();}else go(HOME);return;}
+ if(page==HOME){if(target==0)go(MENU);else if(target==1)voice_volume(5);else if(target==2)voice_volume(-5);return;}
+ if(page==MENU||page==RELAYS||page==DISCOVER){
+  int n=page==MENU?(int)(sizeof(items)/sizeof(items[0])):page==RELAYS?relays_count()+1:discovered_count+1;
+  int per=page==MENU?5:4,pos=page==RELAYS?relays_order_position(selection):selection;
+  if(target==0||target==2)pos=cyd_page_start(pos,n,per,target==0?-1:1);
+  else if(target>=10)pos=pos/per*per+target-10;
+  else return;
+  if(pos>=n)return;
+  selection=page==RELAYS?(pos==n-1?-1:relays_order_at(pos)):pos;
+  if(target>=10)key(1,KEY_SHORT,NULL);
+  return;
+ }
+ if(page==GALLERY){
+  if(gallery_revision!=sstv_store_revision()){go(GALLERY);return;}
+  if(!gallery_preview_ready||gallery_count<=0)return;
+  if(target==21||target==1){gallery_zoom=!gallery_zoom;image_changed();return;}
+  if(target==20&&!gallery_side_ready[0])return;
+  if(target==22&&!gallery_side_ready[1])return;
+  if(target==20||target==0)gallery_request(-1);
+  if(target==22||target==2)gallery_request(1);
+  return;
+ }
+ if(target<3)key(target,KEY_SHORT,NULL);
+}
+static void cyd_controls(void){
+ static lv_obj_t *nav,*labels[4];static bool ptt_down,ptt_candidate;static int last_page=-1;static bool tracking,consume;static int start_x,start_y,start_page,start_selection,start_kind,start_rows;static unsigned start_revision;static int64_t start;
+ if(!nav){nav=lv_obj_create(lv_layer_top());lv_obj_set_size(nav,320,30);lv_obj_set_pos(nav,0,210);lv_obj_set_style_pad_all(nav,0,0);lv_obj_set_style_bg_color(nav,lv_color_hex(0x16354a),0);lv_obj_set_style_text_color(nav,lv_color_hex(0xffffff),0);lv_obj_set_style_bg_opa(nav,LV_OPA_COVER,0);lv_obj_clear_flag(nav,LV_OBJ_FLAG_SCROLLABLE);for(int i=0;i<4;i++){labels[i]=lv_label_create(nav);lv_obj_set_pos(labels[i],i*80+8,6);}}
+
+ if(last_page!=page){const char *home_nav[]={"菜单","音量+","音量-","PTT"},*other[]={"Prev","OK","Back","PTT"},*list[]={"Page -","","Back","PTT"},*album[]={"Prev","View","Back","PTT"};const char **text=page==HOME?home_nav:cyd_content_rows()?list:page==GALLERY?album:other;for(int i=0;i<4;i++){lv_obj_set_style_text_font(labels[i],&ui_small,0);lv_obj_set_pos(labels[i],i*80+8,6);lv_label_set_text(labels[i],text[i]);}last_page=page;}
+ int x,y;bool down;if(!cyd_touch_poll(&x,&y,&down)){if(ptt_down){voice_ptt(false);ptt_down=false;consume=true;}ptt_candidate=false;return;}
+ if(ptt_down&&(!down||page!=start_page||cyd_target(CYD_CONTENT_NONE,0,x,y)!=30)){voice_ptt(false);ptt_down=false;consume=true;}
+ display_idle.last_activity=esp_timer_get_time()/1000;
+ if(down){if(!tracking){consume=screen_sleep.sleeping||(page==GALLERY&&atomic_load(&gallery_work));screen_sleep.sleeping=false;tracking=true;start_x=x;start_y=y;start=esp_timer_get_time();start_page=page;start_selection=selection;start_kind=cyd_content_kind();start_rows=cyd_content_rows();start_revision=discovered_revision;if(!consume&&cyd_target(start_kind,start_rows,x,y)==30){consume=true;ptt_candidate=true;}}
+ else if(abs(x-start_x)>20||abs(y-start_y)>20){consume=true;ptt_candidate=false;}
+ if(ptt_candidate&&(page!=start_page||cyd_target(CYD_CONTENT_NONE,0,x,y)!=30))ptt_candidate=false;
+ if(ptt_candidate&&esp_timer_get_time()-start>=60000){ptt_candidate=false;ptt_down=voice_ptt(true);}
+ return;}
+ if(!tracking)return;
+ tracking=false;ptt_candidate=false;
+ consume=consume||start_page!=page||start_selection!=selection||(page==DISCOVER&&start_revision!=discovered_revision);
+ int target=cyd_tap(start_kind,start_rows,start_x,start_y,x,y,esp_timer_get_time()-start,consume);if(target<0)return;
+ cyd_activate(target);refresh();
+}
+#endif
+
 void app_main(void){
  #ifdef CONFIG_FMO_BOARD_XINGZHI
  // Power hold from the reference board. Do not use M5 I2C on GPIO21.
  ESP_ERROR_CHECK(rtc_gpio_hold_dis(FMO_POWER_HOLD));ESP_ERROR_CHECK(rtc_gpio_deinit(FMO_POWER_HOLD));
  gpio_config_t power={.pin_bit_mask=1ULL<<FMO_POWER_HOLD,.mode=GPIO_MODE_OUTPUT};ESP_ERROR_CHECK(gpio_config(&power));ESP_ERROR_CHECK(gpio_set_level(FMO_POWER_HOLD,1));
 #endif
+ #ifndef CONFIG_FMO_BOARD_CYD28_PLUS
  gpio_config_t cfg={.pin_bit_mask=(1ULL<<FMO_KEY_A)|(1ULL<<FMO_KEY_B)|(1ULL<<FMO_KEY_C),.mode=GPIO_MODE_INPUT
 #ifdef CONFIG_FMO_BOARD_XINGZHI
  ,.pull_up_en=GPIO_PULLUP_ENABLE
 #endif
  };ESP_ERROR_CHECK(gpio_config(&cfg));
+#endif
  side_leds_init();battery_init();
 
-#ifndef CONFIG_FMO_BOARD_XINGZHI
+#if !defined(CONFIG_FMO_BOARD_XINGZHI) && !defined(CONFIG_FMO_BOARD_CYD28_PLUS)
  gpio_set_level(4,1);gpio_set_direction(4,GPIO_MODE_OUTPUT);
  gpio_set_level(14,1);gpio_set_direction(14,GPIO_MODE_OUTPUT);
 #endif
@@ -801,14 +914,33 @@ void app_main(void){
  ESP_LOGI("memory_stage","after_store free=%u largest=%u",(unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),(unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
  esp_err_t result=device_web_start();
  if(result!=ESP_OK){lv_label_set_text(title,"USB 后台启动失败");ESP_LOGE("main","init: %s",esp_err_to_name(result));}
- if(result==ESP_OK){load_settings();lv_disp_set_rotation(NULL,(lv_disp_rot_t)rotation);create_ui();}
- int pins[3]={FMO_KEY_A,FMO_KEY_B,FMO_KEY_C};uint8_t initial=0;for(int i=0;i<3;i++)if(!gpio_get_level(pins[i]))initial|=1<<i;buttons_init(&keys,key_layout_mask(ui_key_layout,initial),key,NULL);buttons_set_momentary(&keys,!ptt_latch);int64_t updated=0,led_updated=0;
+ if(result==ESP_OK){load_settings();
+#ifdef CONFIG_FMO_BOARD_CYD28_PLUS
+ rotation=0;ui_key_layout=0;
+#endif
+lv_disp_set_rotation(NULL,(lv_disp_rot_t)rotation);create_ui();}
+ uint8_t initial=0;
+#ifndef CONFIG_FMO_BOARD_CYD28_PLUS
+ int pins[3]={FMO_KEY_A,FMO_KEY_B,FMO_KEY_C};for(int i=0;i<3;i++)if(!gpio_get_level(pins[i]))initial|=1<<i;
+#endif
+buttons_init(&keys,key_layout_mask(ui_key_layout,initial),key,NULL);buttons_set_momentary(&keys,!ptt_latch);int64_t updated=0,led_updated=0;
  while(1){
  if(sstv_sd_pause_display()){vTaskDelay(pdMS_TO_TICKS(10));continue;}
 #ifdef CONFIG_FMO_BOARD_XINGZHI
  unsigned loop_now=(unsigned)(esp_timer_get_time()/1000),last_loop=atomic_load(&ui_loop_ms);if(last_loop)ui_max(&ui_loop_max_ms,loop_now-last_loop);atomic_store(&ui_loop_ms,loop_now);
 #endif
- ui_mark(1);resource_metrics_sample();int64_t now=esp_timer_get_time();uint8_t pressed=0;for(int i=0;i<3;i++)if(!gpio_get_level(pins[i]))pressed|=1<<i;if(result==ESP_OK){if(now-led_updated>=25000){voice_view_t led_voice;voice_view(&led_voice);side_leds_update(FMO_HAS_SIDE_LEDS&&breathing&&led_voice.tx,FMO_HAS_SIDE_LEDS&&breathing&&led_voice.rx,now/1000);unsigned brightness=display_idle_screen_step(&display_idle,&screen_sleep,now/1000,led_voice.tx||led_voice.rx,pressed);ui_screen_sleeping=screen_sleep.sleeping;ui_idle_seconds=(now/1000-display_idle.last_activity)/1000;ui_pressed_mask=pressed;if(brightness!=ui_backlight_percent){disp_driver_set_brightness(brightness);ui_backlight_percent=brightness;}led_updated=now;}uint8_t usable=screen_sleep.sleeping||screen_sleep.consume?0:pressed;buttons_step(&keys,page==KEY_LAYOUT?usable:key_layout_mask(ui_key_layout,usable),now/1000,page==HOME);if(now-updated>150000){
+ ui_mark(1);resource_metrics_sample();int64_t now=esp_timer_get_time();uint8_t pressed=0;
+#ifdef CONFIG_FMO_BOARD_CYD28_PLUS
+ cyd_controls();
+ if(result==ESP_OK)cyd_remote_probe_tick(now);
+#else
+ for(int i=0;i<3;i++)if(!gpio_get_level(pins[i]))pressed|=1<<i;
+#endif
+if(result==ESP_OK){if(now-led_updated>=25000){voice_view_t led_voice;voice_view(&led_voice);side_leds_update(FMO_HAS_SIDE_LEDS&&breathing&&led_voice.tx,FMO_HAS_SIDE_LEDS&&breathing&&led_voice.rx,now/1000);unsigned brightness=display_idle_screen_step(&display_idle,&screen_sleep,now/1000,led_voice.tx||led_voice.rx,pressed);
+#ifdef CONFIG_FMO_BOARD_CYD28_PLUS
+brightness=brightness?100:0; // Plus backlight is steady on/off: PWM couples into speaker.
+#endif
+ui_screen_sleeping=screen_sleep.sleeping;ui_idle_seconds=(now/1000-display_idle.last_activity)/1000;ui_pressed_mask=pressed;if(brightness!=ui_backlight_percent){disp_driver_set_brightness(brightness);ui_backlight_percent=brightness;}led_updated=now;}uint8_t usable=screen_sleep.sleeping||screen_sleep.consume?0:pressed;buttons_step(&keys,page==KEY_LAYOUT?usable:key_layout_mask(ui_key_layout,usable),now/1000,page==HOME);if(now-updated>150000){
 #ifdef CONFIG_FMO_BOARD_XINGZHI
  int64_t refresh_start=esp_timer_get_time();
 #endif

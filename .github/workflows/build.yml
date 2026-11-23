@@ -20,10 +20,18 @@ jobs:
         run: |
           . "$IDF_PATH/export.sh"
           python tools/build_board.py xingzhi
+      - name: Build Plus ESP32 touchscreen firmware
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          python tools/build_board.py cyd28_plus
       - uses: actions/upload-artifact@v4
         with:
           name: fmo-multiboard-firmware
           path: |
+            build-cyd28_plus/m5-fmo-ui-preview.bin
+            build-cyd28_plus/bootloader/bootloader.bin
+            build-cyd28_plus/partition_table/partition-table.bin
             build-m5-regression/m5-fmo-ui-preview.bin
             build-m5-regression/bootloader/bootloader.bin
             build-m5-regression/partition_table/partition-table.bin

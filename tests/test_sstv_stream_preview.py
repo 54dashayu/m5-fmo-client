@@ -57,3 +57,19 @@ puts("PASS M5 row rendering: RX scaling preserved; three gallery images, 120x90 
 '''
 with tempfile.TemporaryDirectory() as td:
  p=Path(td)/'test.c';p.write_text(pre+fn+tail);subprocess.run(['cc','-DCONFIG_IDF_TARGET_ESP32','-I'+str(root/'ui-preview-firmware/main'),'-Wall','-Wextra','-Werror',str(p),'-o',td+'/test'],check=True);subprocess.run([td+'/test'],check=True)
+# Compile the same renderer for the Plus and compare every zoom pixel and margin.
+zoom=r'''
+page=GALLERY;sharp_mode=false;gallery_zoom=true;clip=(lv_area_t){0,30,319,209};
+for(unsigned i=0;i<sizeof(gallery_buffer);i++)gallery_buffer[i]=(i*37)&255;
+rows=0;image_draw(NULL);assert(rows==180);
+for(unsigned y=0;y<180;y++)for(unsigned x=0;x<320;x++){
+ uint16_t expected=lv_color_make(13,21,29);
+ if(x>=40&&x<280){uint8_t v=gallery_buffer[(y/3)*80+(x-40)/3];expected=lv_color_make((v>>5)*255/7,((v>>2)&7)*255/7,(v&3)*255/3);}
+ assert(rendered[y*320+x]==expected);
+}
+clip.y1=99;clip.y2=106;rows=0;image_draw(NULL);assert(rows==8);
+puts("PASS Plus zoom: 240x180 preview, all pixels/margins, clipped refresh, no full-frame allocation");
+'''
+with tempfile.TemporaryDirectory() as td:
+ p=Path(td)/'plus.c';p.write_text(pre+'\nstatic bool gallery_zoom;\n'+fn+tail.replace('puts("PASS M5 row rendering:',zoom+'puts("PASS M5 row rendering:'))
+ subprocess.run(['cc','-DCONFIG_FMO_BOARD_CYD28_PLUS','-DCONFIG_IDF_TARGET_ESP32','-I'+str(root/'ui-preview-firmware/main'),'-Wall','-Wextra','-Werror',str(p),'-o',td+'/test'],check=True);subprocess.run([td+'/test'],check=True)

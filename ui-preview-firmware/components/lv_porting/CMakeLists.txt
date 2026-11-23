@@ -1,5 +1,7 @@
 if(IDF_TARGET STREQUAL "esp32s3")
     idf_component_register(SRCS "xingzhi_display.c" INCLUDE_DIRS "." REQUIRES fmo_board lvgl esp_lcd driver)
+elseif(CONFIG_FMO_BOARD_CYD28_PLUS)
+    idf_component_register(SRCS "cyd28_plus_display.c" INCLUDE_DIRS "." REQUIRES fmo_board lvgl driver nvs_flash esp_lcd)
 else()
-    idf_component_register(SRCS "lv_port_disp.c" INCLUDE_DIRS "." REQUIRES lvgl lvgl_esp32_drivers)
+    idf_component_register(SRCS "lv_port_disp.c" INCLUDE_DIRS "." REQUIRES fmo_board lvgl lvgl_esp32_drivers driver nvs_flash esp_lcd)
 endif()

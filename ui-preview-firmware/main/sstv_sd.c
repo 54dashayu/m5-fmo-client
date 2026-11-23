@@ -1,6 +1,6 @@
 #include "sstv_sd.h"
 #include "sdkconfig.h"
-#ifdef CONFIG_IDF_TARGET_ESP32
+#if defined(CONFIG_IDF_TARGET_ESP32) && !defined(CONFIG_FMO_BOARD_CYD28_PLUS)
 #include "driver/sdspi_host.h"
 #include "esp_vfs_fat.h"
 #include "sdmmc_cmd.h"

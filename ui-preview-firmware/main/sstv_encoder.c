@@ -37,5 +37,5 @@ size_t sstv_encoder_read(sstv_encoder_t *e,int16_t *out,size_t n){
  if(e->failed)break;
  e->phase+=6.283185307179586f*hz/8000;
  if(e->phase>=6.283185307179586f)e->phase-=6.283185307179586f;
- out[i++]=hz?(int16_t)(10000*sinf(e->phase)):0;e->sample++;}return i;
+ out[i++]=hz?(int16_t)(SSTV_TX_PCM_PEAK*sinf(e->phase)):0;e->sample++;}return i;
 }

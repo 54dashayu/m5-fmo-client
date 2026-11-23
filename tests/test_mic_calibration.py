@@ -7,6 +7,7 @@ prefix=r"""
 #include <stddef.h>
 #include <stdbool.h>
 #include <assert.h>
+#define ESP_LOGI(...) ((void)0)
 #define I2S_NUM_0 0
 #define ESP_OK 0
 #define pdMS_TO_TICKS(x) (x)
@@ -24,4 +25,6 @@ with tempfile.TemporaryDirectory() as d:
  p=Path(d)/'test.c';p.write_text(prefix+code+main)
  subprocess.run(['cc','-Wall','-Wextra','-Werror',str(p),'-o',d+'/test'],check=True)
  subprocess.run([d+'/test'],check=True)
+ subprocess.run(['cc','-DCONFIG_FMO_BOARD_CYD28_PLUS','-Wall','-Wextra','-Werror',str(p),'-o',d+'/plus'],check=True)
+ subprocess.run([d+'/plus'],check=True)
 print('PASS actual calibration corrects slow DMA clock, bounds retries and rejects short reads')

@@ -13,6 +13,11 @@
 #ifndef CONFIG_FMO_BOARD_XINGZHI
 #include "driver/i2s.h"
 #include "driver/adc.h"
+#ifdef CONFIG_FMO_BOARD_CYD28_PLUS
+#define FMO_MIC_ADC_CHANNEL ADC1_CHANNEL_7 /* MAX9814 OUT on GPIO35 */
+#else
+#define FMO_MIC_ADC_CHANNEL ADC1_CHANNEL_6
+#endif
 #include "driver/dac.h"
 #endif
 #include "freertos/FreeRTOS.h"
@@ -37,8 +42,14 @@ _Static_assert(pdMS_TO_TICKS(5)>0,"S3 audio polling must block at least one sche
 typedef struct{uint16_t n;int64_t arrival;uint8_t data[VOICE_RX_PACKET_MAX];} packet_t;
 static voice_view_t state={.volume=25};static portMUX_TYPE mux=portMUX_INITIALIZER_UNLOCKED;static voice_rx_t rx_buffer;static SemaphoreHandle_t qlock;static nvs_handle_t nv;static voice_publish_t publish_packet;
 static TaskHandle_t audio_handle;
+#ifdef CONFIG_FMO_BOARD_CYD28_PLUS
+static bool cyd_tone_active,cyd_pcm_requested;
+#endif
 #ifndef CONFIG_FMO_BOARD_XINGZHI
 static QueueHandle_t audio_events;
+#endif
+#ifdef CONFIG_FMO_BOARD_CYD28_PLUS
+bool cyd_voice_tone_active(void){portENTER_CRITICAL(&mux);bool active=cyd_tone_active;portEXIT_CRITICAL(&mux);return active;}
 #endif
 uint32_t voice_stack_free(void){return audio_handle?uxTaskGetStackHighWaterMark(audio_handle):0;}
 static int64_t stop_requested_at;
@@ -55,16 +66,27 @@ static bool requested,test_requested,tone_requested;static uint32_t uid,server_u
 static void reason(const char*s){portENTER_CRITICAL(&mux);snprintf(state.stop_reason,sizeof(state.stop_reason),"%s",s);portEXIT_CRITICAL(&mux);ESP_LOGI("voice","stop=%s",s);}
 static void notice(const char*s){portENTER_CRITICAL(&mux);snprintf(state.notice,sizeof(state.notice),"%s",s);portEXIT_CRITICAL(&mux);}
 void voice_view(voice_view_t*out){portENTER_CRITICAL(&mux);bool rx=esp_timer_get_time()<rx_until;if(!rx)call_history_push(state.last_caller,state.previous_caller,state.caller);*out=state;out->rx=rx;portEXIT_CRITICAL(&mux);}
-bool voice_busy(void){voice_view_t v;voice_view(&v);portENTER_CRITICAL(&mux);bool pending=requested||test_requested||sstv_job;portEXIT_CRITICAL(&mux);return pending||v.tx||v.rx||v.mic_test||v.tx_pending;}
+bool voice_busy(void){voice_view_t v;voice_view(&v);portENTER_CRITICAL(&mux);bool pending=requested||test_requested||sstv_job;
+#ifdef CONFIG_FMO_BOARD_CYD28_PLUS
+pending=pending||tone_requested||cyd_tone_active;
+#endif
+portEXIT_CRITICAL(&mux);return pending||v.tx||v.rx||v.mic_test||v.tx_pending;}
 void voice_identity(uint32_t u,const char*c,uint32_t srv){portENTER_CRITICAL(&mux);uid=u;server_uid=srv;snprintf(own_call,sizeof(own_call),FMO_CALL_PREFIX "%.6s",c);portEXIT_CRITICAL(&mux);}
 void voice_display_call(const char*c){portENTER_CRITICAL(&mux);snprintf(own_call,sizeof(own_call),"%.12s",c);portEXIT_CRITICAL(&mux);}
 void voice_connected(bool on){portENTER_CRITICAL(&mux);bool interrupted=!on&&requested;state.connected=on;if(!on){call_history_push(state.last_caller,state.previous_caller,state.caller);connection_epoch++;sstv_cancel=true;if(requested)stop_requested_at=esp_timer_get_time();requested=false;rx_until=0;}bool recovered=on&&!state.tx&&!requested&&!strcmp(state.stop_reason,"mqtt_disconnected");portEXIT_CRITICAL(&mux);if(interrupted)reason("mqtt_disconnected");if(recovered)notice("已重新接入，守听中");if(!on&&qlock){xSemaphoreTake(qlock,portMAX_DELAY);voice_rx_clear(&rx_buffer);xSemaphoreGive(qlock);}}
-bool voice_ptt(bool down){portENTER_CRITICAL(&mux);bool ok=!down||(state.connected&&state.ready&&!test_requested&&!sstv_job&&esp_timer_get_time()>=rx_until);if(!down&&sstv_job)sstv_cancel=true;if(ok){if(!down&&requested)stop_requested_at=esp_timer_get_time();requested=down;if(down){stop_requested_at=0;state.stop_reason[0]=0;}}portEXIT_CRITICAL(&mux);if(!down)reason("key_or_page");if(down&&!ok)notice("尚未接入或频道忙，请稍后重试");return ok;}
+bool voice_ptt(bool down){if(down&&!FMO_HAS_MIC){notice("本机未安装麦克风");return false;}portENTER_CRITICAL(&mux);bool ok=!down||(state.connected&&state.ready&&!test_requested&&!sstv_job&&esp_timer_get_time()>=rx_until);if(!down&&sstv_job)sstv_cancel=true;if(ok){if(!down&&requested)stop_requested_at=esp_timer_get_time();requested=down;if(down){stop_requested_at=0;state.stop_reason[0]=0;}}portEXIT_CRITICAL(&mux);if(!down)reason("key_or_page");if(down&&!ok)notice("尚未接入或频道忙，请稍后重试");return ok;}
 bool voice_toggle_ptt(void){portENTER_CRITICAL(&mux);bool active=requested||state.tx||sstv_job;portEXIT_CRITICAL(&mux);return voice_ptt(!active);}
 void voice_volume(int d){portENTER_CRITICAL(&mux);int n=state.volume+d;state.volume=n<0?0:n>100?100:n;int v=state.volume;portEXIT_CRITICAL(&mux);nvs_set_u8(nv,"volume",v);nvs_commit(nv);}
 void voice_mute(void){portENTER_CRITICAL(&mux);state.muted=!state.muted;int m=state.muted;portEXIT_CRITICAL(&mux);nvs_set_u8(nv,"mute",m);nvs_commit(nv);}
-void voice_mic_test(bool on){portENTER_CRITICAL(&mux);test_requested=on;requested=false;if(on)sstv_cancel=true;portEXIT_CRITICAL(&mux);}
-void voice_tone(void){if(!voice_busy()){portENTER_CRITICAL(&mux);tone_requested=true;portEXIT_CRITICAL(&mux);}}
+void voice_mic_test(bool on){if(on&&!FMO_HAS_MIC)return;portENTER_CRITICAL(&mux);test_requested=on;requested=false;if(on)sstv_cancel=true;portEXIT_CRITICAL(&mux);}
+void voice_tone(void){if(!voice_busy()){portENTER_CRITICAL(&mux);tone_requested=true;
+#ifdef CONFIG_FMO_BOARD_CYD28_PLUS
+cyd_pcm_requested=false;
+#endif
+portEXIT_CRITICAL(&mux);}}
+#ifdef CONFIG_FMO_BOARD_CYD28_PLUS
+void cyd_voice_pcm_tone(void){if(!voice_busy()){portENTER_CRITICAL(&mux);cyd_pcm_requested=true;tone_requested=true;portEXIT_CRITICAL(&mux);}}
+#endif
 void voice_reject_oversized(size_t n){portENTER_CRITICAL(&mux);state.rx_oversized++;if(n>state.rx_max_bytes)state.rx_max_bytes=n;portEXIT_CRITICAL(&mux);}
 static int64_t last_rx_arrival;static uint32_t last_rx_uid,last_rx_base;
 void voice_receive(const uint8_t*p,size_t n){if(!qlock)return;voice_packet_t v;bool valid=voice_parse(p,n,&v);portENTER_CRITICAL(&mux);if(n>state.rx_max_bytes)state.rx_max_bytes=n;if(!valid)state.rx_rejected++;else if((unsigned)v.count>state.rx_max_frames)state.rx_max_frames=v.count;portEXIT_CRITICAL(&mux);if(!valid)return;portENTER_CRITICAL(&mux);bool drop=v.uid==uid||state.tx||test_requested||sstv_job;portEXIT_CRITICAL(&mux);if(drop)return;
@@ -84,7 +106,13 @@ static bool receive_packet(packet_t*out,unsigned wait_ms){int64_t deadline=esp_t
 static void audio_stop(void){if(mode<0)return;last_pcm_feed=0;if(mode)i2s_adc_disable(I2S_NUM_0);i2s_stop(I2S_NUM_0);i2s_driver_uninstall(I2S_NUM_0);i2s_set_dac_mode(I2S_DAC_CHANNEL_DISABLE);mode=-1;audio_events=NULL;}
 // DAC silence is unsigned midscale, never zero-filled DMA. Keep output running
 // between packets for a 2-second jitter tail; release idle DMA resources.
-static esp_err_t audio_mode(bool mic){if(mode==(int)mic)return ESP_OK;audio_stop();i2s_config_t cfg={.mode=I2S_MODE_MASTER|(mic?(I2S_MODE_RX|I2S_MODE_ADC_BUILT_IN):(I2S_MODE_TX|I2S_MODE_DAC_BUILT_IN)),.sample_rate=mic?mic_clock_request:8000,.bits_per_sample=I2S_BITS_PER_SAMPLE_16BIT,.channel_format=mic?I2S_CHANNEL_FMT_ONLY_LEFT:I2S_CHANNEL_FMT_RIGHT_LEFT,.communication_format=I2S_COMM_FORMAT_STAND_MSB,.dma_buf_count=mic?4:6,.dma_buf_len=160,.use_apll=true,.tx_desc_auto_clear=false};esp_err_t e=i2s_driver_install(I2S_NUM_0,&cfg,mic?8:32,&audio_events);if(e!=ESP_OK)return e;mode=mic;if(!mic)memset(&dac_filter,0,sizeof(dac_filter));if(mic){adc1_config_width(ADC_WIDTH_BIT_12);adc1_config_channel_atten(ADC1_CHANNEL_6,ADC_ATTEN_DB_11);e=i2s_set_adc_mode(ADC_UNIT_1,ADC1_CHANNEL_6);if(e==ESP_OK)e=i2s_adc_enable(I2S_NUM_0);}else e=i2s_set_dac_mode(I2S_DAC_CHANNEL_RIGHT_EN);return e;}
+static esp_err_t audio_mode(bool mic){if(mic&&!FMO_HAS_MIC)return ESP_ERR_NOT_SUPPORTED;if(mode==(int)mic)return ESP_OK;audio_stop();i2s_config_t cfg={.mode=I2S_MODE_MASTER|(mic?(I2S_MODE_RX|I2S_MODE_ADC_BUILT_IN):(I2S_MODE_TX|I2S_MODE_DAC_BUILT_IN)),.sample_rate=mic?mic_clock_request:8000,.bits_per_sample=I2S_BITS_PER_SAMPLE_16BIT,.channel_format=mic?I2S_CHANNEL_FMT_ONLY_LEFT:I2S_CHANNEL_FMT_RIGHT_LEFT,.communication_format=I2S_COMM_FORMAT_STAND_MSB,.dma_buf_count=mic?4:6,.dma_buf_len=160,.use_apll=true,.tx_desc_auto_clear=false};esp_err_t e=i2s_driver_install(I2S_NUM_0,&cfg,mic?8:32,&audio_events);if(e!=ESP_OK)return e;mode=mic;if(!mic)memset(&dac_filter,0,sizeof(dac_filter));if(mic){adc1_config_width(ADC_WIDTH_BIT_12);adc1_config_channel_atten(FMO_MIC_ADC_CHANNEL,ADC_ATTEN_DB_11);e=i2s_set_adc_mode(ADC_UNIT_1,FMO_MIC_ADC_CHANNEL);if(e==ESP_OK)e=i2s_adc_enable(I2S_NUM_0);}else e=i2s_set_dac_mode(
+#ifdef CONFIG_FMO_BOARD_CYD28_PLUS
+I2S_DAC_CHANNEL_LEFT_EN
+#else
+I2S_DAC_CHANNEL_RIGHT_EN
+#endif
+);return e;}
 static void play(const int16_t*pcm,int count){uint16_t out[320];while(count>0){voice_view_t v;voice_view(&v);int n=count>160?160:count;for(int i=0;i<n;i++){int sample=pcm?pcm[i]:0;out[i*2]=out[i*2+1]=voice_dac_sample(&dac_filter,sample,v.muted?0:v.volume,pcm==NULL);}int64_t feed_now=esp_timer_get_time();
  if(pcm&&last_pcm_feed){uint32_t gap=feed_now-last_pcm_feed;portENTER_CRITICAL(&mux);if(gap>state.play_gap_us_max)state.play_gap_us_max=gap;if(gap>100000)state.play_late_feeds++;portEXIT_CRITICAL(&mux);}
  size_t done=0;esp_err_t e=i2s_write(I2S_NUM_0,out,n*4,&done,pdMS_TO_TICKS(60));
@@ -113,6 +141,9 @@ static int measure_dac_rate(void){
 #else
 #include "boards/xingzhi/audio.inc"
 #endif
+#ifdef CONFIG_FMO_BOARD_CYD28_PLUS
+#include "boards/cyd28_plus/tone_probe.inc"
+#endif
 // Count actual ADC DMA samples over multiple blocks; no samples are transmitted.
 static int measure_mic_rate(void){
  uint16_t samples[640];size_t got=0;
@@ -128,14 +159,22 @@ static int calibrate_mic_rate(int*initial){
  int rate=measure_mic_rate();audio_stop();*initial=rate;return rate;
 #else
  int measured=0;*initial=0;
- for(int pass=0;pass<3;pass++){
+ #ifdef CONFIG_FMO_BOARD_CYD28_PLUS
+ const int attempts=8; /* ADC calibration overlaps Wi-Fi/TLS startup on this board. */
+#else
+ const int attempts=3;
+#endif
+ for(int pass=0;pass<attempts;pass++){
   if(audio_mode(true)!=ESP_OK)break;
   measured=measure_mic_rate();audio_stop();if(!pass)*initial=measured;
+#ifdef CONFIG_FMO_BOARD_CYD28_PLUS
+  ESP_LOGI("voice","mic calibration pass=%d request=%d measured=%d",pass+1,mic_clock_request,measured);
+#endif
   if(measured>=7920&&measured<=8080)return measured;
   if(measured<5000||measured>12000)break;
   int next=(int)(((int64_t)mic_clock_request*8000+measured/2)/measured);
   if(next<6000||next>14000)break;
-  if(pass<2)mic_clock_request=next;
+  if(pass+1<attempts)mic_clock_request=next;
  }
  return measured;
 #endif
@@ -173,7 +212,11 @@ static bool sstv_start(uint32_t id,bool probe){
  if(ok){sstv_job=id;sstv_cancel=false;sstv_progress=0;memset(&sstv_diag,0,sizeof(sstv_diag));sstv_diag.probe=probe;}
  portEXIT_CRITICAL(&mux);return ok;
 }
-bool voice_sstv_start(uint32_t id){return sstv_start(id,false);}
+bool voice_sstv_start(uint32_t id){
+#ifdef CONFIG_FMO_BOARD_CYD28_PLUS
+ notice("SSTV 发射暂不支持");return false;
+#endif
+return sstv_start(id,false);}
 bool voice_sstv_probe(uint32_t id){return sstv_start(id,true);}
 void voice_sstv_diagnostics(voice_sstv_diag_t *out){portENTER_CRITICAL(&mux);*out=sstv_diag;portEXIT_CRITICAL(&mux);}
 void voice_sstv_stop(void){portENTER_CRITICAL(&mux);sstv_cancel=true;portEXIT_CRITICAL(&mux);}
@@ -232,7 +275,7 @@ static void audio_task(void*a){(void)a;int error=0;decoder=opus_decoder_create(8
 #ifdef CONFIG_FMO_BOARD_XINGZHI
  if(measured<7600||measured>8400||state.output_errors)init=ESP_FAIL;
 #endif
- audio_stop();int mic_initial=0;int mic_measured=init==ESP_OK?calibrate_mic_rate(&mic_initial):0;portENTER_CRITICAL(&mux);state.mic_rate=mic_measured;state.mic_initial_rate=mic_initial;state.mic_clock_request=mic_clock_request;state.dac_rate=hardware;state.dma_rate=measured;state.ready=init==ESP_OK&&decoder!=NULL&&hardware>=7800&&hardware<=8200&&mic_measured>=7840&&mic_measured<=8160;portEXIT_CRITICAL(&mux);if(!state.ready){notice("音频初始化失败");ESP_LOGE("voice","init=%d opus=%d dac_rate=%d",init,error,measured);audio_handle=NULL;vTaskDelete(NULL);return;}
+ audio_stop();int mic_initial=0;int mic_measured=FMO_HAS_MIC&&init==ESP_OK?calibrate_mic_rate(&mic_initial):0;portENTER_CRITICAL(&mux);state.mic_rate=mic_measured;state.mic_initial_rate=mic_initial;state.mic_clock_request=mic_clock_request;state.dac_rate=hardware;state.dma_rate=measured;state.ready=init==ESP_OK&&decoder!=NULL&&hardware>=7800&&hardware<=8200&&(!FMO_HAS_MIC||(mic_measured>=7840&&mic_measured<=8160));portEXIT_CRITICAL(&mux);if(!state.ready){notice("音频初始化失败");ESP_LOGE("voice","init=%d opus=%d dac_rate=%d",init,error,measured);audio_handle=NULL;vTaskDelete(NULL);return;}
 #ifdef FMO_SSTV_STREAMING
  // Initialization validated the codec; idle/RADPCM operation needs no Opus allocation.
  opus_decoder_destroy(decoder);decoder=NULL;
@@ -240,6 +283,9 @@ static void audio_task(void*a){(void)a;int error=0;decoder=opus_decoder_create(8
  notice("音频已就绪");packet_t packet;int16_t pcm[640];uint16_t raw[640];uint8_t frames[656];voice_tx_t txq={0};uint32_t tx_epoch=0,tx_start_drops=0;int collected=0,predictor=0,index=0;voice_mic_filter_t mic_filter={0};bool previous=false,was_test=false;uint16_t sequence=1;uint32_t base=0,last_uid=0,last_base=0;voice_dedup_t duplicate_state={0};bool seen=false,underrun=false;int64_t started=0,silence_until=0,buffered_session=-1;
  while(1){portENTER_CRITICAL(&mux);bool want=requested&&state.connected,testing=test_requested,tone=tone_requested;tone_requested=false;bool connected=state.connected,receiving=esp_timer_get_time()<rx_until;uint32_t epoch=connection_epoch;
 uint32_t media_epoch=epoch+rx_loss_epoch;
+#ifdef CONFIG_FMO_BOARD_CYD28_PLUS
+bool pcm_tone=cyd_pcm_requested;
+#endif
 portEXIT_CRITICAL(&mux);
   portENTER_CRITICAL(&mux);uint32_t image_job=sstv_job;portEXIT_CRITICAL(&mux);
   if(image_job){voice_tx_clear(&txq);send_sstv(image_job,epoch,pcm,frames,&txq);previous=false;continue;}
@@ -281,7 +327,14 @@ portEXIT_CRITICAL(&mux);
  else if(testing){radpcm_encode(pcm,frames,0,&predictor,&index);if(radpcm_decode(frames,(int16_t*)raw)){unsigned error=voice_mic_error(pcm,(int16_t*)raw,640);portENTER_CRITICAL(&mux);state.mic_metrics.codec_error=error;portEXIT_CRITICAL(&mux);}}
 #endif
  continue;}
+#ifdef CONFIG_FMO_BOARD_CYD28_PLUS
+  if(tone){portENTER_CRITICAL(&mux);cyd_tone_active=true;portEXIT_CRITICAL(&mux);
+   esp_err_t probe=pcm_tone?cyd_pcm_tone():cyd_hardware_tone();
+   portENTER_CRITICAL(&mux);cyd_tone_active=false;if(probe!=ESP_OK)state.output_errors++;portEXIT_CRITICAL(&mux);
+   notice(probe==ESP_OK?(pcm_tone?"PCM测试完成，请比较劈声":"硬件测试完成，请比较劈声"):"音频测试失败");silence_until=esp_timer_get_time()+2000000;continue;}
+#else
   if(tone){if(audio_mode(false)!=ESP_OK){notice("音频切换失败，请重启");continue;}for(int b=0;b<20;b++){for(int i=0;i<160;i++)pcm[i]=(i%10<5)?1800:-1800;play(pcm,160);}play(NULL,640);silence_until=esp_timer_get_time()+2000000;continue;}
+#endif
   portENTER_CRITICAL(&mux);int64_t first_arrival=rx_first_arrival;portEXIT_CRITICAL(&mux);
   unsigned buffer_ms=240;
 #ifndef CONFIG_FMO_BOARD_XINGZHI

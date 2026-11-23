@@ -137,7 +137,10 @@ static bool storage_stats(sstv_storage_t*out,const sstv_entry_t*entries,int n){
  const esp_partition_t*part=esp_partition_find_first(ESP_PARTITION_TYPE_DATA,ESP_PARTITION_SUBTYPE_DATA_SPIFFS,partition_label);if(!part)return false;
  out->total=part->size;out->used=used;out->safe_limit=part->size*7/10;if(out->safe_limit>total)out->safe_limit=total;}
 #else
- out->total=1024*1024;out->safe_limit=out->total*7/10;for(int i=0;i<n;i++)out->used+=entries[i].file_bytes;
+ #ifndef SSTV_HOST_CAPACITY
+#define SSTV_HOST_CAPACITY (1024*1024)
+#endif
+ out->total=SSTV_HOST_CAPACITY;out->safe_limit=out->total*7/10;for(int i=0;i<n;i++)out->used+=entries[i].file_bytes;
 #endif
 #ifndef FMO_SSTV_STREAMING
  size_t bytes=0;unsigned compressed=0;for(int i=0;i<n;i++)if(entries[i].compressed){bytes+=entries[i].file_bytes;compressed++;}
@@ -288,6 +291,8 @@ bool sstv_store_reader_row(void *ctx,unsigned row,uint8_t *pixels){
 bool sstv_store_import(sstv_import_read_t read,void *ctx,uint32_t at,uint32_t *id){
  if(error||!read||!id||!take())return false;
  int n=list(entry_scratch);sstv_storage_t space;bool ok=storage_stats(&space,entry_scratch,n)&&(on_sd||album_count<SSTV_GALLERY_MAX)&&space.used+153600*5/4+4096<=space.safe_limit;
+ if(!ok){save_error="相册空间不足，请先导出并删除旧图";give();return false;}
+ save_error="图片导入失败，请重试";
  uint32_t next=n>0?entry_scratch[0].id+1:1;ok=ok&&next;
  char tmp[300],path[300];snprintf(tmp,sizeof(tmp),"%s/fmo-upload.tmp",directory);filename(path,next);
  FILE *f=ok?fopen(tmp,"wb"):NULL;ok=ok&&f;

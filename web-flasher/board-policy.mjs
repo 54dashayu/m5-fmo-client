@@ -1,4 +1,5 @@
 export const BOARDS={
+ 'esp32-2432s028r-plus':{name:'Plus 2.8 寸触屏 · ESP32-2432S028R Plus（4MB）',chip:'ESP32',flashSize:'4MB',app:0x10000,nvsSize:0x6000,appSize:0x310000,addresses:[0x1000,0x8000,0x9000,0x10000],names:['bootloader.bin','partition-table.bin','initial-settings.bin','application.bin'],hardware:'仅限实物丝印 ESP32-2432S028R Plus：ESP32-WROOM-32E、4MB Flash、ST7789、电阻触摸。MAX9814 接 OUT→IO35、VDD→3.3V、GND共地；内部Flash相册，不使用TF。不是黄色CYD或LCDWIKI E32R28T通用固件。已知问题：PCM播放可能有噼啪声；真实PTT/SSTV收发尚未验收。',photo:'photos/plus-front.png'},
  'm5-fire':{name:'M5GO / FIRE 类（ESP32，16MB Flash）',chip:'ESP32',flashSize:'16MB',app:0x10000,nvsSize:0x6000,appSize:0x300000,addresses:[0x1000,0x8000,0x10000],names:['bootloader.bin','partition-table.bin','application.bin'],hardware:'16MB Flash 的原版 ESP32 M5GO / FIRE 类硬件（无需 PSRAM）：模拟麦克风 GPIO34、扬声器 GPIO25。不是 Core2 / CoreS3。',photo:'photos/m5-device-1.jpg'},
  'xingzhi-cube-1.54tft-wifi':{name:'小智 Xingzhi Cube 1.54（ESP32-S3）',chip:'ESP32-S3',flashSize:'16MB',app:0x30000,nvsSize:0x17000,appSize:0x500000,addresses:[0,0x8000,0x9000,0x30000],names:['bootloader.bin','partition-table.bin','initial-settings.bin','application.bin'],hardware:'Xingzhi Cube 1.54 英寸 TFT，ESP32-S3 R8N16（16MB Flash / 8MB PSRAM），三实体按键。不是所有小智设备通用。',photo:'photos/xiaozhi-device.jpg'}
 };
@@ -13,6 +14,7 @@ export function validateManifest(manifest,id){
 }
 // Exact supported layouts: only append the gallery; never move existing data.
 export const LAYOUTS={
+ 'esp32-2432s028r-plus':[[1,2,0x9000,0x6000],[1,1,0xf000,0x1000],[0,0,0x10000,0x310000],[1,0x82,0x320000,0xe0000]],
  'm5-fire':[[1,2,0x9000,0x6000],[1,1,0xf000,0x1000],[0,0,0x10000,0x300000],[1,0x82,0x310000,0xf0000],[1,0x82,0x400000,0x400000]],
  'xingzhi-cube-1.54tft-wifi':[[1,2,0x9000,0x17000],[1,1,0x20000,0x1000],[0,0,0x30000,0x500000],[1,0x82,0x700000,0x100000]]
 };
@@ -25,7 +27,7 @@ export function partitionPlan(data,id){
   rows.push([d.getUint8(p+2),d.getUint8(p+3),d.getUint32(p+4,true),d.getUint32(p+8,true)]);
  }
  if(JSON.stringify(rows)===JSON.stringify(expected))return 'current';
- if(JSON.stringify(rows)===JSON.stringify(expected.slice(0,-1)))return 'migrate';
+ if(id!=='esp32-2432s028r-plus'&&JSON.stringify(rows)===JSON.stringify(expected.slice(0,-1)))return 'migrate';
  return null;
 }
 export function validPartitions(data,id){return partitionPlan(data,id)!==null;}

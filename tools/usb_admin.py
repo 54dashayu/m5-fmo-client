@@ -52,15 +52,29 @@ class Link:
    self.serial=None
    raise
 
-def render_management_page(template, s3=False):
+def render_management_page(template, s3=False, board=None):
+ if board is not None and board not in ("m5-fire","xingzhi-cube-1.54tft-wifi","esp32-2432s028r-plus"):
+  raise ValueError("Unknown board; refusing to label the device as M5")
+ if board is not None:s3=board=="xingzhi-cube-1.54tft-wifi"
+ plus=board=="esp32-2432s028r-plus"
  values={'FMO_WEB_TITLE':'ESP32/小智设备管理' if s3 else '机婶婶 · M5 设备管理','FMO_WEB_DEVICE':'小智' if s3 else 'M5','FMO_WEB_KIND':'其他 ESP32' if s3 else 'M5','FMO_WEB_MODEL':'ESP32-S3 · 小智' if s3 else 'M5GO','FMO_WEB_PREFIX':'E.' if s3 else 'M.'}
+ if plus:values.update(FMO_WEB_TITLE='ESP32-2432S028R Plus 设备管理',FMO_WEB_DEVICE='ESP32-2432S028R Plus',FMO_WEB_KIND='其他 ESP32',FMO_WEB_MODEL='ESP32 · ESP32-2432S028R Plus',FMO_WEB_PREFIX='E.')
+ values.update(FMO_WEB_HAS_TF='0' if s3 or plus else '1',FMO_WEB_CAN_TX='0' if plus else '1',FMO_WEB_GALLERY_STORAGE='<p>本设备使用内部相册，容量以实际剩余空间为准。</p>' if s3 or plus else (Path(__file__).resolve().parents[1]/'ui-preview-firmware/main/web_gallery_tf.html').read_text())
  for key,value in values.items():template=template.replace('@'+key+'@',value)
  return template.encode()
 
 def serve(link,serial_port,port):
  token=secrets.token_urlsafe(32);authority=f'127.0.0.1:{port}';origin='http://'+authority
- device=next((p for p in list_ports.comports() if p.device==serial_port),None)
- page=render_management_page((Path(__file__).resolve().parents[1]/'ui-preview-firmware/main/web.html').read_text().replace('<body>','<body data-transport="usb"><style>#login{display:none!important}</style>'),bool(device and device.vid==0x303a and device.pid==0x1001))
+ # Opening CH340 may reset the board; retry only this read, keeping DTR/RTS stable.
+ for attempt in range(3):
+  try:
+   board=link.call('status').get('board');break
+  except TimeoutError:
+   if attempt==2:raise
+ if not board:raise ValueError('设备未报告板型，USB 管理页未启动')
+ page=render_management_page((Path(__file__).resolve().parents[1]/'ui-preview-firmware/main/web.html').read_text().replace('<body>','<body data-transport="usb"><style>#login{display:none!important}</style>'),board=board)
+ panel='<section style="margin:16px;padding:16px;border:1px solid #789"><button id="usbRevealCode">查看本机管理码（仅 USB）</button> <span id="usbCodeResult"></span></section><script>document.getElementById("usbRevealCode").onclick=async()=>{const el=document.getElementById("usbCodeResult");try{const t=await (await fetch("/api/transport")).json();const r=await fetch("/api/management-code",{headers:{"X-Device-Token":t.token}});const v=await r.json();if(!r.ok||!v.code)throw Error(v.error||"请使用支持显码的固件");el.textContent=v.code}catch(e){el.textContent=e.message}};</script>'
+ page=page.replace(b'</body>',panel.encode()+b'</body>')
  class Handler(BaseHTTPRequestHandler):
   def log_message(self,*args):pass
   def send(self,status,value,html=False):
@@ -79,7 +93,7 @@ def serve(link,serial_port,port):
    if self.command=='GET' and self.path=='/api/transport':return self.send(200,{'usb':True,'token':token})
    if self.headers.get('X-Device-Token')!=token:return self.send(401,{'error':'请刷新本机管理页面'})
    if self.command=='GET' and self.path=='/api/diagnostics':return self.send(200,{'events':list(link.events)})
-   routes={('GET','/api/audio/diagnostics'):'audio_diagnostics',('POST','/api/sstv/tx/probe'):'sstv_tx_probe',('GET','/api/gallery/card/status'):'gallery_card_status',('GET','/api/gallery/storage'):'gallery_storage',('POST','/api/gallery/storage'):'gallery_storage_select',('POST','/api/gallery/card/retry'):'gallery_card_retry',('POST','/api/gallery/card/format'):'gallery_card_format',('POST','/api/gallery/page'):'gallery_page',('POST','/api/sstv/tx'):'sstv_tx_start',('GET','/api/sstv/tx'):'sstv_tx_status',('POST','/api/sstv/tx/stop'):'sstv_tx_stop',('POST','/api/station/broadcast'):'station_broadcast',('GET','/api/station'):'station_get',('POST','/api/station'):'station_save',('POST','/api/gallery/initialize'):'gallery_initialize',('GET','/api/mic/diagnostics'):'mic_diagnostics',('POST','/api/sstv/codec-probe'):'sstv_codec_probe',('POST','/api/sstv/storage-probe'):'sstv_storage_probe',('POST','/api/login'):'login',('GET','/api/sstv/wall-probe'):'sstv_wall_probe',('POST','/api/sstv/prepare'):'sstv_prepare',('GET','/api/sstv/status'):'sstv_status',('GET','/api/gallery'):'gallery',('POST','/api/roots'):'roots',('POST','/api/relays/page'):'relays_paged',('POST','/api/discovery/add'):'discovery_add',('GET','/api/discovery'):'discovery',('POST','/api/discovery/refresh'):'discovery_refresh',('POST','/api/discovery/select'):'discovery_select',('POST','/api/logout'):'logout',('POST','/api/relay/name'):'relay_name',('POST','/api/relay/delete'):'relay_delete',('POST','/api/identity/reset'):'identity_reset',('POST','/api/certificate/rollback'):'rollback',('POST','/api/scan'):'scan',('GET','/api/networks'):'networks',('POST','/api/network/connect'):'network_connect',('POST','/api/network/delete'):'network_delete',('GET','/api/status'):'status',('GET','/api/relays'):'relays',('POST','/api/relays'):'relay_add',('POST','/api/relay/select'):'relay_select',('POST','/api/wifi'):'wifi',('POST','/api/reconnect'):'reconnect',('POST','/api/request'):'request',('POST','/api/certificate'):'certificate',('DELETE','/api/certificate'):'delete'}
+   routes={('POST','/api/audio/probe-pcm'):'audio_probe_pcm',('POST','/api/audio/probe'):'audio_probe',('GET','/api/audio/probe'):'audio_probe_status',('GET','/api/management-code'):'management_code',('GET','/api/audio/diagnostics'):'audio_diagnostics',('POST','/api/sstv/tx/probe'):'sstv_tx_probe',('GET','/api/gallery/card/status'):'gallery_card_status',('GET','/api/gallery/storage'):'gallery_storage',('POST','/api/gallery/storage'):'gallery_storage_select',('POST','/api/gallery/card/retry'):'gallery_card_retry',('POST','/api/gallery/card/format'):'gallery_card_format',('POST','/api/gallery/page'):'gallery_page',('POST','/api/sstv/tx'):'sstv_tx_start',('GET','/api/sstv/tx'):'sstv_tx_status',('POST','/api/sstv/tx/stop'):'sstv_tx_stop',('POST','/api/station/broadcast'):'station_broadcast',('GET','/api/station'):'station_get',('POST','/api/station'):'station_save',('POST','/api/gallery/initialize'):'gallery_initialize',('GET','/api/mic/diagnostics'):'mic_diagnostics',('POST','/api/sstv/codec-probe'):'sstv_codec_probe',('POST','/api/sstv/storage-probe'):'sstv_storage_probe',('POST','/api/login'):'login',('GET','/api/sstv/wall-probe'):'sstv_wall_probe',('POST','/api/sstv/prepare'):'sstv_prepare',('GET','/api/sstv/status'):'sstv_status',('GET','/api/gallery'):'gallery',('POST','/api/roots'):'roots',('POST','/api/relays/page'):'relays_paged',('POST','/api/discovery/add'):'discovery_add',('GET','/api/discovery'):'discovery',('POST','/api/discovery/refresh'):'discovery_refresh',('POST','/api/discovery/select'):'discovery_select',('POST','/api/logout'):'logout',('POST','/api/relay/name'):'relay_name',('POST','/api/relay/delete'):'relay_delete',('POST','/api/identity/reset'):'identity_reset',('POST','/api/certificate/rollback'):'rollback',('POST','/api/scan'):'scan',('GET','/api/networks'):'networks',('POST','/api/network/connect'):'network_connect',('POST','/api/network/delete'):'network_delete',('GET','/api/status'):'status',('GET','/api/relays'):'relays',('POST','/api/relays'):'relay_add',('POST','/api/relay/select'):'relay_select',('POST','/api/wifi'):'wifi',('POST','/api/reconnect'):'reconnect',('POST','/api/request'):'request',('POST','/api/certificate'):'certificate',('DELETE','/api/certificate'):'delete'}
    op=routes.get((self.command,self.path))
    if not op:return self.send(404,{'error':'未知接口'})
    data={}

@@ -5,6 +5,9 @@ choice FMO_BOARD
 config FMO_BOARD_M5_FIRE
     bool "M5 FIRE (original ESP32)"
     depends on IDF_TARGET_ESP32
+config FMO_BOARD_CYD28_PLUS
+    bool "ESP32-2432S028R Plus (4MB, resistive touch, receive only)"
+    depends on IDF_TARGET_ESP32
 config FMO_BOARD_XINGZHI
     bool "Xingzhi Cube 1.54 TFT Wi-Fi"
     depends on IDF_TARGET_ESP32S3
